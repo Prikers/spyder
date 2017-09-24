@@ -24,15 +24,15 @@ from qtpy.compat import getsavefilename
 from qtpy.QtCore import (QByteArray, QFileInfo, QObject, QPoint, QSize, Qt,
                          QThread, QTimer, Signal, Slot)
 from qtpy.QtGui import QFont
-from qtpy.QtWidgets import (QAction, QApplication, QHBoxLayout, QMainWindow,
-                            QMessageBox, QMenu, QSplitter, QVBoxLayout,
-                            QWidget, QListWidget, QListWidgetItem)
+from qtpy.QtWidgets import (QAction, QApplication, QFileDialog, QHBoxLayout,
+                            QMainWindow, QMessageBox, QMenu, QSplitter,
+                            QVBoxLayout, QWidget, QListWidget, QListWidgetItem)
 
 # Local imports
 from spyder.config.base import _, DEBUG, STDERR, STDOUT
 from spyder.config.gui import config_shortcut, get_shortcut
 from spyder.config.utils import (get_edit_filetypes, get_edit_filters,
-                                 get_filter)
+                                 get_filter, is_kde_desktop, is_anaconda)
 from spyder.py3compat import qbytearray_to_str, to_text_string
 from spyder.utils import icon_manager as ima
 from spyder.utils import (codeanalysis, encoding, sourcecode,
@@ -304,7 +304,12 @@ class StackHistory(MutableSequence):
         return len(self.history)
 
     def __getitem__(self, i):
-        return self.id_list.index(self.history[i])
+        self._update_id_list()
+        try:
+            return self.id_list.index(self.history[i])
+        except ValueError:
+            self.refresh()
+            raise IndexError
 
     def __delitem__(self, i):
         del self.history[i]
@@ -440,7 +445,7 @@ class EditorStack(QWidget):
     zoom_in = Signal()
     zoom_out = Signal()
     zoom_reset = Signal()
-    sig_close_file = Signal(str, int)
+    sig_close_file = Signal(str, str)
     file_saved = Signal(str, int, str)
     file_renamed_in_data = Signal(str, int, str)
     create_new_window = Signal()
@@ -462,6 +467,8 @@ class EditorStack(QWidget):
     sig_prev_edit_pos = Signal()
     sig_prev_cursor = Signal()
     sig_next_cursor = Signal()
+    sig_prev_warning = Signal()
+    sig_next_warning = Signal()
 
     def __init__(self, parent, actions):
         QWidget.__init__(self, parent)
@@ -597,6 +604,10 @@ class EditorStack(QWidget):
         # Reference to save msgbox and avoid memory to be freed.
         self.msgbox = None
 
+        # File types and filters used by the Save As dialog
+        self.edit_filetypes = None
+        self.edit_filters = None
+
     @Slot()
     def show_in_external_file_explorer(self, fnames=None):
         """Show file in external file explorer"""
@@ -697,6 +708,14 @@ class EditorStack(QWidget):
                                       context="Editor",
                                       name="re-run last cell",
                                       parent=self)
+        prev_warning = config_shortcut(lambda: self.sig_prev_warning.emit(),
+                                       context="Editor",
+                                       name="Previous warning",
+                                       parent=self)
+        next_warning = config_shortcut(lambda: self.sig_next_warning.emit(),
+                                       context="Editor",
+                                       name="Next warning",
+                                       parent=self)
 
         # Return configurable ones
         return [inspect, set_breakpoint, set_cond_breakpoint, gotoline, tab,
@@ -704,7 +723,8 @@ class EditorStack(QWidget):
                 save_all, save_as, close_all, prev_edit_pos, prev_cursor,
                 next_cursor, zoom_in_1, zoom_in_2, zoom_out, zoom_reset,
                 close_file_1, close_file_2, run_cell, run_cell_and_advance,
-                go_to_next_cell, go_to_previous_cell, re_run_last_cell]
+                go_to_next_cell, go_to_previous_cell, re_run_last_cell,
+                prev_warning, next_warning]
 
     def get_shortcut_data(self):
         """
@@ -748,6 +768,7 @@ class EditorStack(QWidget):
                              corner_widgets=corner_widgets)
         self.tabs.tabBar().setObjectName('plugin-tab')
         self.tabs.set_close_function(self.close_file)
+        self.tabs.tabBar().tabMoved.connect(self.move_editorstack_data)
         self.tabs.setMovable(True)
 
         self.stack_history.refresh()
@@ -1335,8 +1356,7 @@ class EditorStack(QWidget):
         self.horsplit_action.setEnabled(state)
         self.versplit_action.setEnabled(state)
 
-
-    #------ Accessors
+    # ------ Accessors
     def get_current_filename(self):
         if self.data:
             return self.data[self.get_stack_index()].filename
@@ -1367,6 +1387,33 @@ class EditorStack(QWidget):
             return len(self.data) > 0
         else:
             return self.has_filename(filename)
+
+    def get_index_from_filename(self, filename):
+        """
+        Return the position index of a file in the tab bar of the editorstack
+        from its name.
+        """
+        filenames = [d.filename for d in self.data]
+        return filenames.index(filename)
+
+    @Slot(int, int)
+    def move_editorstack_data(self, start, end):
+        """Reorder editorstack.data so it is synchronized with the tab bar when
+        tabs are moved."""
+        if start < 0 or end < 0:
+            return
+        else:
+            steps = abs(end - start)
+            direction = (end-start) // steps  # +1 for right, -1 for left
+
+        data = self.data
+        self.blockSignals(True)
+
+        for i in range(start, end, direction):
+            data[i], data[i+direction] = data[i+direction], data[i]
+
+        self.blockSignals(False)
+        self.refresh()
 
 
     #------ Close file, tabwidget...
@@ -1399,13 +1446,14 @@ class EditorStack(QWidget):
             if self.outlineexplorer is not None:
                 self.outlineexplorer.remove_editor(finfo.editor)
 
+            filename = self.data[index].filename
             self.remove_from_data(index)
 
             # We pass self object ID as a QString, because otherwise it would
             # depend on the platform: long for 64bit, int for 32bit. Replacing
             # by long all the time is not working on some 32bit platforms
             # (see Issue 1094, Issue 1098)
-            self.sig_close_file.emit(str(id(self)), index)
+            self.sig_close_file.emit(str(id(self)), filename)
 
             if not self.data and self.is_closable:
                 # editortabwidget is empty: removing it
@@ -1588,12 +1636,29 @@ class EditorStack(QWidget):
         finfo.lastmodified = QFileInfo(finfo.filename).lastModified()
 
     def select_savename(self, original_filename):
+        """Select a name to save a file."""
+        if self.edit_filetypes is None:
+            self.edit_filetypes = get_edit_filetypes()
+        if self.edit_filters is None:
+            self.edit_filters = get_edit_filters()
+
+        # Don't use filters on KDE to not make the dialog incredible
+        # slow
+        # Fixes issue 4156
+        if is_kde_desktop() and not is_anaconda():
+            filters = ''
+            selectedfilter = ''
+        else:
+            filters = self.edit_filters
+            selectedfilter = get_filter(self.edit_filetypes,
+                                        osp.splitext(original_filename)[1])
+
         self.redirect_stdio.emit(False)
         filename, _selfilter = getsavefilename(self, _("Save file"),
-                                       original_filename,
-                                       get_edit_filters(),
-                                       get_filter(get_edit_filetypes(),
-                                           osp.splitext(original_filename)[1]))
+                                    original_filename,
+                                    filters=filters,
+                                    selectedfilter=selectedfilter,
+                                    options=QFileDialog.HideNameFilterDetails)
         self.redirect_stdio.emit(True)
         if filename:
             return osp.normpath(filename)
@@ -1748,12 +1813,11 @@ class EditorStack(QWidget):
                 pass
 
     def _get_previous_file_index(self):
-        if len(self.stack_history) > 1:
-            last = len(self.stack_history)-1
-            w_id = self.stack_history.pop(last)
-            self.stack_history.insert(0, w_id)
-
-            return self.stack_history[last]
+        """Return the penultimate element of the stack history."""
+        try:
+            return self.stack_history[-2]
+        except IndexError:
+            return None
 
     def tab_navigation_mru(self, forward=True):
         """
@@ -2754,11 +2818,12 @@ class EditorPluginExample(QSplitter):
     def get_focus_widget(self):
         pass
 
-    @Slot(str, int)
-    def close_file_in_all_editorstacks(self, editorstack_id_str, index):
+    @Slot(str, str)
+    def close_file_in_all_editorstacks(self, editorstack_id_str, filename):
         for editorstack in self.editorstacks:
             if str(id(editorstack)) != editorstack_id_str:
                 editorstack.blockSignals(True)
+                index = editorstack.get_index_from_filename(filename)
                 editorstack.close_file(index, force=True)
                 editorstack.blockSignals(False)
 
