@@ -225,11 +225,14 @@ class NamespaceBrowser(QWidget):
         search_variable = PatternComboBox(
                 self, tip=_("Search variable"), adjust_to_minimum=False)
         previous_button = create_toolbutton(
-                self, triggered=self.find_previous, icon=ima.icon('ArrowUp'))
+                self, text=_("Search next"), icon=ima.icon('ArrowUp'),
+                triggered=self.find_previous)
         next_button = create_toolbutton(
-                self, triggered=self.find_next, icon=ima.icon('ArrowDown'))
+                self, text=_("Search previous"), icon=ima.icon('ArrowDown'),
+                triggered=self.find_next)
         close_button = create_toolbutton(
-                self, triggered=self.hide, icon=ima.icon('DialogCloseButton'))
+                self, text=_("Close toolbar"),
+                icon=ima.icon('DialogCloseButton'), triggered=self.hide)
 
         layout2 = [search_variable, previous_button, next_button, close_button]
 
@@ -396,4 +399,5 @@ class NamespaceBrowser(QWidget):
         pass
 
     def hide(self):
-        pass
+        self.show_search_toolbar 
+        self.search_button.setChecked(not self.search_button.isChecked())
