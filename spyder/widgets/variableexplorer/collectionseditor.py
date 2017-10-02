@@ -200,7 +200,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.sizes = sizes
             self.types = types
 
-    def sort(self, column, order=Qt.AscendingOrder):
+    def sort(self, column, order=Qt.AscendingOrder, custom_key_order=None):
         """Overriding sort method"""
         reverse = (order==Qt.DescendingOrder)
         if column == 0:
@@ -231,6 +231,12 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.keys = sort_against(self.keys, values, reverse)
             self.sizes = sort_against(self.sizes, values, reverse)
             self.types = sort_against(self.types, values, reverse)
+        elif column == -1 and custom_key_order:
+            self.sizes = [self.sizes[self.get_index_from_key(key).row()]
+                          for key in custom_key_order]
+            self.types = [self.types[self.get_index_from_key(key).row()]
+                          for key in custom_key_order]
+            self.keys[:self.rows_loaded] = custom_key_order
         self.beginResetModel()
         self.endResetModel()
 

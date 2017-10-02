@@ -12,6 +12,7 @@ This is the main widget used in the Variable Explorer plugin
 
 # Standard library imports
 import os.path as osp
+from difflib import get_close_matches
 
 # Third library imports (qtpy)
 from qtpy.compat import getsavefilename, getopenfilenames
@@ -222,7 +223,7 @@ class NamespaceBrowser(QWidget):
                    reset_namespace_button, self.search_button]
 
         # Layout 2
-        search_variable = PatternComboBox(
+        self.search_variable = PatternComboBox(
                 self, tip=_("Search variable"), adjust_to_minimum=False)
         previous_button = create_toolbutton(
                 self, text=_("Search next"), icon=ima.icon('ArrowUp'),
@@ -234,7 +235,8 @@ class NamespaceBrowser(QWidget):
                 self, text=_("Close toolbar"),
                 icon=ima.icon('DialogCloseButton'), triggered=self.hide)
 
-        layout2 = [search_variable, previous_button, next_button, close_button]
+        layout2 = [self.search_variable, previous_button, next_button,
+                   close_button]
 
         toolbar = (layout1, layout2)
         self.setup_in_progress = False
@@ -393,7 +395,14 @@ class NamespaceBrowser(QWidget):
                 self.hlayout2.itemAt(index).widget().setVisible(state)
 
     def find_previous(self):
-        pass
+        data = self.editor.model.showndata.keys()
+        text = self.search_variable.currentText()
+        if len(text) == 0 or len(data) == 0:
+            return
+        results = get_close_matches(text, data, n=10, cutoff=0)
+        results += [var for var in data if var not in results]
+        self.editor.model.sort(column=-1, custom_key_order=results)
+        return results
 
     def find_next(self):
         pass
