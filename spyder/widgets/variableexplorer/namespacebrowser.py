@@ -399,8 +399,7 @@ class NamespaceBrowser(QWidget):
         text = self.search_variable.currentText()
         if len(text) == 0 or len(data) == 0:
             return
-        results = get_close_matches(text, data, n=10, cutoff=0)
-        results += [var for var in data if var not in results]
+        results = get_close_matches(text, data, n=len(data), cutoff=0)
         self.editor.model.sort(column=-1, custom_key_order=results)
         return results
 

@@ -117,6 +117,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.title = self.title + ' - '
         self.sizes = []
         self.types = []
+        self.scores = []
         self.set_data(data)
         
     def get_data(self):
@@ -164,6 +165,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.title += data_type
 
         self.total_rows = len(self.keys)
+        self.scores = [0] * len(self.keys)
         if self.total_rows > LARGE_NROWS:
             self.rows_loaded = ROWS_TO_LOAD
         else:
@@ -231,18 +233,12 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.keys = sort_against(self.keys, values, reverse)
             self.sizes = sort_against(self.sizes, values, reverse)
             self.types = sort_against(self.types, values, reverse)
-        elif column == -1 and custom_key_order:
-            self.sizes = [self.sizes[self.get_index_from_key(key).row()]
-                          for key in custom_key_order]
-            self.types = [self.types[self.get_index_from_key(key).row()]
-                          for key in custom_key_order]
-            self.keys[:self.rows_loaded] = custom_key_order
         self.beginResetModel()
         self.endResetModel()
 
     def columnCount(self, qindex=QModelIndex()):
         """Array column number"""
-        return 4
+        return 5
 
     def rowCount(self, index=QModelIndex()):
         """Array row number"""
@@ -285,8 +281,10 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             return self.types[ index.row() ]
         elif index.column() == 2:
             return self.sizes[ index.row() ]
-        else:
+        elif index.column() == 3:
             return self._data[ self.keys[index.row()] ]
+        else:
+            return self.scores[ index.row() ]
 
     def get_bgcolor(self, index):
         """Background color depending on value"""
@@ -336,7 +334,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             return to_qvariant()
         i_column = int(section)
         if orientation == Qt.Horizontal:
-            headers = (self.header0, _("Type"), _("Size"), _("Value"))
+            headers = (self.header0, _("Type"), _("Size"), _("Value"), "Score")
             return to_qvariant( headers[i_column] )
         else:
             return to_qvariant()
@@ -363,6 +361,7 @@ class CollectionsModel(ReadOnlyCollectionsModel):
         self.showndata[ self.keys[index.row()] ] = value
         self.sizes[index.row()] = get_size(value)
         self.types[index.row()] = get_human_readable_type(value)
+        self.scores[index.row()] = 0
 
     def get_bgcolor(self, index):
         """Background color depending on value"""
@@ -382,7 +381,7 @@ class CollectionsModel(ReadOnlyCollectionsModel):
         """Cell content change"""
         if not index.isValid():
             return False
-        if index.column() < 3:
+        if index.column() != 3:
             return False
         value = display_to_value(value, self.get_value(index),
                                  ignore_errors=True)
@@ -431,7 +430,7 @@ class CollectionsDelegate(QItemDelegate):
 
     def createEditor(self, parent, option, index):
         """Overriding method createEditor"""
-        if index.column() < 3:
+        if index.column() != 3:
             return None
         if self.show_warning(index):
             answer = QMessageBox.warning(self.parent(), _("Warning"),
@@ -1170,6 +1169,7 @@ class CollectionsEditorTableView(BaseTableView):
 
         self.setup_table()
         self.menu = self.setup_menu(minmax)
+        self.hideColumn(4)
 
         if isinstance(data, set):
             self.horizontalHeader().hideSection(0)
@@ -1412,6 +1412,7 @@ class RemoteCollectionsEditorTableView(BaseTableView):
 
         self.setup_table()
         self.menu = self.setup_menu(minmax)
+        self.hideColumn(4)
 
     #------ Remote/local API --------------------------------------------------
     def get_value(self, name):
