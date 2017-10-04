@@ -71,6 +71,8 @@ ipykernel.pickleutil.can_map.pop('numpy.ndarray')
 
 LARGE_NROWS = 100
 ROWS_TO_LOAD = 50
+KEY, TYPE, SIZE, VALUE, SCORE = [0, 1, 2, 3, 4]
+N_COLS = 5
 
 class ProxyObject(object):
     """Dictionary proxy to an unknown object."""
@@ -205,14 +207,14 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
     def sort(self, column, order=Qt.AscendingOrder, custom_key_order=None):
         """Overriding sort method"""
         reverse = (order==Qt.DescendingOrder)
-        if column == 0:
+        if column == KEY:
             self.sizes = sort_against(self.sizes, self.keys, reverse)
             self.types = sort_against(self.types, self.keys, reverse)
             try:
                 self.keys.sort(reverse=reverse)
             except:
                 pass
-        elif column == 1:
+        elif column == TYPE:
             self.keys[:self.rows_loaded] = sort_against(self.keys, self.types,
                                                         reverse)
             self.sizes = sort_against(self.sizes, self.types, reverse)
@@ -220,7 +222,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
                 self.types.sort(reverse=reverse)
             except:
                 pass
-        elif column == 2:
+        elif column == SIZE:
             self.keys[:self.rows_loaded] = sort_against(self.keys, self.sizes,
                                                         reverse)
             self.types = sort_against(self.types, self.sizes, reverse)
@@ -228,7 +230,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
                 self.sizes.sort(reverse=reverse)
             except:
                 pass
-        elif column == 3:
+        elif column == VALUE:
             values = [self._data[key] for key in self.keys]
             self.keys = sort_against(self.keys, values, reverse)
             self.sizes = sort_against(self.sizes, values, reverse)
@@ -238,7 +240,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
 
     def columnCount(self, qindex=QModelIndex()):
         """Array column number"""
-        return 5
+        return N_COLS
 
     def rowCount(self, index=QModelIndex()):
         """Array row number"""
@@ -275,23 +277,23 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
     
     def get_value(self, index):
         """Return current value"""
-        if index.column() == 0:
+        if index.column() == KEY:
             return self.keys[ index.row() ]
-        elif index.column() == 1:
+        elif index.column() == TYPE:
             return self.types[ index.row() ]
-        elif index.column() == 2:
+        elif index.column() == SIZE:
             return self.sizes[ index.row() ]
-        elif index.column() == 3:
+        elif index.column() == VALUE:
             return self._data[ self.keys[index.row()] ]
         else:
             return self.scores[ index.row() ]
 
     def get_bgcolor(self, index):
         """Background color depending on value"""
-        if index.column() == 0:
+        if index.column() == KEY:
             color = QColor(Qt.lightGray)
             color.setAlphaF(.05)
-        elif index.column() < 3:
+        elif index.column() < VALUE:
             color = QColor(Qt.lightGray)
             color.setAlphaF(.2)
         else:
@@ -304,9 +306,9 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
         if not index.isValid():
             return to_qvariant()
         value = self.get_value(index)
-        if index.column() == 3 and self.remote:
+        if index.column() == VALUE and self.remote:
             value = value['view']
-        if index.column() == 3:
+        if index.column() == VALUE:
             display = value_to_display(value, minmax=self.minmax)
         else:
              display = to_text_string(value)
@@ -315,7 +317,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
         elif role == Qt.EditRole:
             return to_qvariant(value_to_display(value))
         elif role == Qt.TextAlignmentRole:
-            if index.column() == 3:
+            if index.column() == VALUE:
                 if len(display.splitlines()) < 3:
                     return to_qvariant(int(Qt.AlignLeft|Qt.AlignVCenter))
                 else:
@@ -366,7 +368,7 @@ class CollectionsModel(ReadOnlyCollectionsModel):
     def get_bgcolor(self, index):
         """Background color depending on value"""
         value = self.get_value(index)
-        if index.column() < 3:
+        if index.column() < VALUE:
             color = ReadOnlyCollectionsModel.get_bgcolor(self, index)
         else:
             if self.remote:
@@ -381,7 +383,7 @@ class CollectionsModel(ReadOnlyCollectionsModel):
         """Cell content change"""
         if not index.isValid():
             return False
-        if index.column() != 3:
+        if index.column() != VALUE:
             return False
         value = display_to_value(value, self.get_value(index),
                                  ignore_errors=True)
@@ -430,7 +432,7 @@ class CollectionsDelegate(QItemDelegate):
 
     def createEditor(self, parent, option, index):
         """Overriding method createEditor"""
-        if index.column() != 3:
+        if index.column() != VALUE:
             return None
         if self.show_warning(index):
             answer = QMessageBox.warning(self.parent(), _("Warning"),
@@ -675,7 +677,9 @@ class BaseTableView(QTableView):
         self.adjust_columns()
         # Sorting columns
         self.setSortingEnabled(True)
-        self.sortByColumn(0, Qt.AscendingOrder)
+        self.sortByColumn(KEY, Qt.AscendingOrder)
+        # Hiding score column
+        self.hideColumn(SCORE)
     
     def setup_menu(self, minmax):
         """Setup context menu"""
@@ -834,7 +838,7 @@ class BaseTableView(QTableView):
         """Set table data"""
         if data is not None:
             self.model.set_data(data, self.dictfilter)
-            self.sortByColumn(0, Qt.AscendingOrder)
+            self.sortByColumn(KEY, Qt.AscendingOrder)
 
     def mousePressEvent(self, event):
         """Reimplement Qt method"""
@@ -857,8 +861,7 @@ class BaseTableView(QTableView):
         index_clicked = self.indexAt(event.pos())
         if index_clicked.isValid():
             row = index_clicked.row()
-            # TODO: Remove hard coded "Value" column number (3 here)
-            index_clicked = index_clicked.child(row, 3)
+            index_clicked = index_clicked.child(row, VALUE)
             self.edit(index_clicked)
         else:
             event.accept()
@@ -934,8 +937,7 @@ class BaseTableView(QTableView):
         index = self.currentIndex()
         if not index.isValid():
             return
-        # TODO: Remove hard coded "Value" column number (3 here)
-        self.edit(index.child(index.row(), 3))
+        self.edit(index.child(index.row(), VALUE))
 
     @Slot()
     def remove_item(self):
@@ -1169,10 +1171,9 @@ class CollectionsEditorTableView(BaseTableView):
 
         self.setup_table()
         self.menu = self.setup_menu(minmax)
-        self.hideColumn(4)
 
         if isinstance(data, set):
-            self.horizontalHeader().hideSection(0)
+            self.horizontalHeader().hideSection(KEY)
 
     #------ Remote/local API --------------------------------------------------
     def remove_values(self, keys):
@@ -1412,7 +1413,6 @@ class RemoteCollectionsEditorTableView(BaseTableView):
 
         self.setup_table()
         self.menu = self.setup_menu(minmax)
-        self.hideColumn(4)
 
     #------ Remote/local API --------------------------------------------------
     def get_value(self, name):
