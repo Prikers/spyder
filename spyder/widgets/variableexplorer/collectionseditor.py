@@ -283,16 +283,10 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.types = sort_against(self.types, values, reverse)
             self.scores = sort_against(self.scores, values, reverse)
         elif column == SCORE:
-            print('BEFORE')
-            for i in range(len(self.keys)): print(i, ':', self.scores[i],
-                                                  self.keys[i])
-            idx = [i for i, score in enumerate(self.scores) if score > 0]
             order = sorted(zip(self.scores, self.keys, self.sizes, self.types),
                            key=lambda x: x[0], reverse=reverse)
-            self.scores, self.keys, self.sizes, self.types = zip(*order)
-            print('AFTER')
-            for i in range(len(self.keys)): print(i, ':', self.scores[i],
-                                                  self.keys[i])
+            self.scores, self.keys, self.sizes, self.types = [
+                list(result) for result in zip(*order)]
         self.beginResetModel()
         self.endResetModel()
 
@@ -730,7 +724,7 @@ class CustomSortFilterProxy(QSortFilterProxyModel):
     def set_filter(self, text):
         """Set regular expression for filter."""
         self.pattern = get_search_regex(text)
-        if self.pattern:
+        if self.pattern and text:
             self._parent.setSortingEnabled(False)
         else:
             self._parent.setSortingEnabled(True)
