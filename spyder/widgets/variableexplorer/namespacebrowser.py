@@ -12,7 +12,6 @@ This is the main widget used in the Variable Explorer plugin
 
 # Standard library imports
 import os.path as osp
-from difflib import get_close_matches
 
 # Third library imports (qtpy)
 from qtpy.compat import getsavefilename, getopenfilenames
@@ -33,7 +32,7 @@ from spyder.utils.programs import is_module_installed
 from spyder.utils.qthelpers import (add_actions, create_action,
                                     create_toolbutton, create_plugin_layout)
 from spyder.widgets.variableexplorer.collectionseditor import (
-    RemoteCollectionsEditorTableView)
+    RemoteCollectionsEditorTableView, VariableFinder)
 from spyder.widgets.variableexplorer.importwizard import ImportWizard
 from spyder.widgets.variableexplorer.utils import REMOTE_SETTINGS
 from spyder.widgets.comboboxes import PatternComboBox
@@ -116,6 +115,10 @@ class NamespaceBrowser(QWidget):
 
         self.editor.sig_option_changed.connect(self.sig_option_changed.emit)
         self.editor.sig_files_dropped.connect(self.import_data)
+
+        self.finder = VariableFinder(self.editor, self.editor.set_regex)
+        self.editor.finder = self.finder
+        #self.label_finder = QLabel(_('Search: '))
 
         # Setup layout
         self.hlayout1 = QHBoxLayout()
@@ -223,8 +226,8 @@ class NamespaceBrowser(QWidget):
                    reset_namespace_button, self.search_button]
 
         # Layout 2
-        self.search_variable = PatternComboBox(
-                self, tip=_("Search variable"), adjust_to_minimum=False)
+        #self.search_variable = PatternComboBox(
+        #        self, tip=_("Search variable"), adjust_to_minimum=False)
         previous_button = create_toolbutton(
                 self, text=_("Search next"), icon=ima.icon('ArrowUp'),
                 triggered=self.find_previous)
@@ -235,7 +238,7 @@ class NamespaceBrowser(QWidget):
                 self, text=_("Close toolbar"),
                 icon=ima.icon('DialogCloseButton'), triggered=self.hide)
 
-        layout2 = [self.search_variable, previous_button, next_button,
+        layout2 = [self.finder, previous_button, next_button,
                    close_button]
 
         toolbar = (layout1, layout2)

@@ -20,6 +20,7 @@ Collections (i.e. dictionary, list, set and tuple) editor widget and dialog
 from __future__ import print_function
 import datetime
 import gc
+import re
 import sys
 
 # Third party imports
@@ -27,12 +28,13 @@ import ipykernel.pickleutil
 from ipykernel.serialize import serialize_object
 from qtpy.compat import getsavefilename, to_qvariant
 from qtpy.QtCore import (QAbstractTableModel, QDateTime, QModelIndex, Qt,
-                         Signal, Slot)
-from qtpy.QtGui import QColor, QKeySequence
+                         Signal, Slot, QRegExp, QSortFilterProxyModel)
+from qtpy.QtGui import QColor, QKeySequence, QRegExpValidator
 from qtpy.QtWidgets import (QAbstractItemDelegate, QApplication, QDateEdit,
                             QDateTimeEdit, QDialog, QDialogButtonBox,
                             QInputDialog, QItemDelegate, QLineEdit, QMenu,
-                            QMessageBox, QTableView, QVBoxLayout, QWidget)
+                            QMessageBox, QTableView, QVBoxLayout, QWidget,
+                            QAbstractItemView)
 
 # Local import
 from spyder.config.base import _
@@ -44,6 +46,7 @@ from spyder.utils import icon_manager as ima
 from spyder.utils.misc import fix_reference_name
 from spyder.utils.qthelpers import (add_actions, create_action,
                                     mimedata2url)
+from spyder.utils.stringmatching import get_search_scores, get_search_regex
 from spyder.widgets.variableexplorer.importwizard import ImportWizard
 from spyder.widgets.variableexplorer.texteditor import TextEditor
 from spyder.widgets.variableexplorer.utils import (
@@ -74,6 +77,10 @@ ROWS_TO_LOAD = 50
 KEY, TYPE, SIZE, VALUE, SCORE = [0, 1, 2, 3, 4]
 N_COLS = 5
 
+VALID_ACCENT_CHARS = "ÁÉÍOÚáéíúóàèìòùÀÈÌÒÙâêîôûÂÊÎÔÛäëïöüÄËÏÖÜñÑ"
+VALID_FINDER_CHARS = "[A-Za-z\s{0}_]".format(VALID_ACCENT_CHARS)
+
+
 class ProxyObject(object):
     """Dictionary proxy to an unknown object."""
 
@@ -95,6 +102,39 @@ class ProxyObject(object):
             setattr(self.__obj__, key, value)
         except TypeError:
             pass
+
+
+class VariableFinder(QLineEdit):
+    """Textbox for filtering variables in the variable explorer."""
+    def __init__(self, parent, callback=None):
+        super(VariableFinder, self).__init__(parent)
+        self._parent = parent
+
+        # Widget setup
+        regex = QRegExp(VALID_FINDER_CHARS + "{100}")
+        self.setValidator(QRegExpValidator(regex))
+
+        # Signals
+        if callback:
+            self.textChanged.connect(callback)
+
+    def set_text(self, text):
+        """Set the filter text."""
+        text = text.strip()
+        new_text = self.text() + text
+        self.setText(new_text)
+
+    def keyPressEvent(self, event):
+        """Qt Override."""
+        key = event.key()
+        if key in [Qt.Key_Up]:
+            self._parent.previous_row()
+        elif key in [Qt.Key_Down]:
+            self._parent.next_row()
+        elif key in [Qt.Key_Enter, Qt.Key_Return]:
+            self._parent.show_editor()
+        else:
+            super(VariableFinder, self).keyPressEvent(event)
 
 
 class ReadOnlyCollectionsModel(QAbstractTableModel):
@@ -121,6 +161,9 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
         self.types = []
         self.scores = []
         self.set_data(data)
+        self.letters = ''
+        self.normal_text = []
+        #self.rich_text = [] #TODO
         
     def get_data(self):
         """Return model data"""
@@ -204,12 +247,13 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.sizes = sizes
             self.types = types
 
-    def sort(self, column, order=Qt.AscendingOrder, custom_key_order=None):
+    def sort(self, column, order=Qt.AscendingOrder):
         """Overriding sort method"""
         reverse = (order==Qt.DescendingOrder)
         if column == KEY:
             self.sizes = sort_against(self.sizes, self.keys, reverse)
             self.types = sort_against(self.types, self.keys, reverse)
+            self.scores = sort_against(self.scores, self.keys, reverse)
             try:
                 self.keys.sort(reverse=reverse)
             except:
@@ -218,6 +262,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.keys[:self.rows_loaded] = sort_against(self.keys, self.types,
                                                         reverse)
             self.sizes = sort_against(self.sizes, self.types, reverse)
+            self.scores = sort_against(self.scores, self.types, reverse)
             try:
                 self.types.sort(reverse=reverse)
             except:
@@ -226,6 +271,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.keys[:self.rows_loaded] = sort_against(self.keys, self.sizes,
                                                         reverse)
             self.types = sort_against(self.types, self.sizes, reverse)
+            self.scores = sort_against(self.scores, self.sizes, reverse)
             try:
                 self.sizes.sort(reverse=reverse)
             except:
@@ -235,6 +281,18 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.keys = sort_against(self.keys, values, reverse)
             self.sizes = sort_against(self.sizes, values, reverse)
             self.types = sort_against(self.types, values, reverse)
+            self.scores = sort_against(self.scores, values, reverse)
+        elif column == SCORE:
+            print('BEFORE')
+            for i in range(len(self.keys)): print(i, ':', self.scores[i],
+                                                  self.keys[i])
+            idx = [i for i, score in enumerate(self.scores) if score > 0]
+            order = sorted(zip(self.scores, self.keys, self.sizes, self.types),
+                           key=lambda x: x[0], reverse=reverse)
+            self.scores, self.keys, self.sizes, self.types = zip(*order)
+            print('AFTER')
+            for i in range(len(self.keys)): print(i, ':', self.scores[i],
+                                                  self.keys[i])
         self.beginResetModel()
         self.endResetModel()
 
@@ -352,6 +410,14 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
     def reset(self):
         self.beginResetModel()
         self.endResetModel()
+        
+    def update_search_letters(self, text):
+        """Update search letters with text input in search box."""
+        self.letters = text
+        names = self.keys
+        results = get_search_scores(text, names, template='<b>{0}</b>')
+        self.normal_text, _, self.scores = zip(*results) # TODO
+        self.reset()
 
 
 class CollectionsModel(ReadOnlyCollectionsModel):
@@ -368,7 +434,7 @@ class CollectionsModel(ReadOnlyCollectionsModel):
     def get_bgcolor(self, index):
         """Background color depending on value"""
         value = self.get_value(index)
-        if index.column() < VALUE:
+        if index.column() in (KEY, TYPE, SIZE, SCORE):
             color = ReadOnlyCollectionsModel.get_bgcolor(self, index)
         else:
             if self.remote:
@@ -401,8 +467,11 @@ class CollectionsDelegate(QItemDelegate):
         
     def get_value(self, index):
         if index.isValid():
-            return index.model().get_value(index)
-    
+            #proxy_model = index.model() # TODO 2
+            #return proxy_model.sourceModel().get_value(  # TODO 2
+            #        proxy_model.mapToSource(index))   # TODO 2
+            return index.model().get_value(index)  # TODO Prikers
+
     def set_value(self, index, value):
         if index.isValid():
             index.model().set_value(index, value)
@@ -420,8 +489,10 @@ class CollectionsDelegate(QItemDelegate):
         lot of time just to get its value
         """
         try:
-            val_size = index.model().sizes[index.row()]
-            val_type = index.model().types[index.row()]
+            proxy_model = index.model()
+            model = proxy_model.sourceModel()
+            val_size = model.sizes[proxy_model.mapToSource(index).row()]
+            val_type = model.types[proxy_model.mapToSource(index).row()]
         except:
             return False
         if val_type in ['list', 'set', 'tuple', 'dict'] and \
@@ -453,7 +524,11 @@ class CollectionsDelegate(QItemDelegate):
                                    "<i>%s</i>"
                                    ) % to_text_string(msg))
             return
-        key = index.model().get_key(index)
+        #key = index.model().get_key(index)  # TODO Prikers
+        proxy_model = index.model()
+        model = proxy_model.sourceModel()
+        key = model.get_key(proxy_model.mapToSource(index))
+        
         readonly = isinstance(value, (tuple, set)) or self.parent().readonly \
                    or not is_known_type(value)
         #---editor = CollectionsEditor
@@ -461,7 +536,7 @@ class CollectionsDelegate(QItemDelegate):
             editor = CollectionsEditor()
             editor.setup(value, key, icon=self.parent().windowIcon(),
                          readonly=readonly)
-            self.create_dialog(editor, dict(model=index.model(), editor=editor,
+            self.create_dialog(editor, dict(model=model, editor=editor,
                                             key=key, readonly=readonly))
             return None
         #---editor = ArrayEditor
@@ -470,7 +545,7 @@ class CollectionsDelegate(QItemDelegate):
             editor = ArrayEditor(parent)
             if not editor.setup_and_check(value, title=key, readonly=readonly):
                 return
-            self.create_dialog(editor, dict(model=index.model(), editor=editor,
+            self.create_dialog(editor, dict(model=model, editor=editor,
                                             key=key, readonly=readonly))
             return None
         #---showing image
@@ -481,7 +556,7 @@ class CollectionsDelegate(QItemDelegate):
             if not editor.setup_and_check(arr, title=key, readonly=readonly):
                 return
             conv_func = lambda arr: Image.fromarray(arr, mode=value.mode)
-            self.create_dialog(editor, dict(model=index.model(), editor=editor,
+            self.create_dialog(editor, dict(model=model, editor=editor,
                                             key=key, readonly=readonly,
                                             conv=conv_func))
             return None
@@ -491,9 +566,9 @@ class CollectionsDelegate(QItemDelegate):
             editor = DataFrameEditor()
             if not editor.setup_and_check(value, title=key):
                 return
-            editor.dataModel.set_format(index.model().dataframe_format)
+            editor.dataModel.set_format(model.dataframe_format)
             editor.sig_option_changed.connect(self.change_option)
-            self.create_dialog(editor, dict(model=index.model(), editor=editor,
+            self.create_dialog(editor, dict(model=model, editor=editor,
                                             key=key, readonly=readonly))
             return None
         #---editor = QDateTimeEdit
@@ -513,7 +588,7 @@ class CollectionsDelegate(QItemDelegate):
             te = TextEditor(None)
             if te.setup_and_check(value):
                 editor = TextEditor(value, key)
-                self.create_dialog(editor, dict(model=index.model(),
+                self.create_dialog(editor, dict(model=model,
                                                 editor=editor, key=key,
                                                 readonly=readonly))
             return None
@@ -533,7 +608,7 @@ class CollectionsDelegate(QItemDelegate):
             editor = CollectionsEditor()
             editor.setup(value, key, icon=self.parent().windowIcon(),
                          readonly=readonly)
-            self.create_dialog(editor, dict(model=index.model(), editor=editor,
+            self.create_dialog(editor, dict(model=model, editor=editor,
                                             key=key, readonly=readonly))
             return None
             
@@ -645,6 +720,45 @@ class CollectionsDelegate(QItemDelegate):
         self.set_value(index, value)
 
 
+class CustomSortFilterProxy(QSortFilterProxyModel):
+    """Custom column filter based on regex."""
+    def __init__(self, parent=None):
+        super(CustomSortFilterProxy, self).__init__(parent)
+        self._parent = parent
+        self.pattern = re.compile(u'')
+
+    def set_filter(self, text):
+        """Set regular expression for filter."""
+        self.pattern = get_search_regex(text)
+        if self.pattern:
+            self._parent.setSortingEnabled(False)
+        else:
+            self._parent.setSortingEnabled(True)
+        self.invalidateFilter()
+
+    def filterAcceptsRow(self, row_num, parent):
+        """Qt override.
+
+        Reimplemented from base class to allow the use of custom filtering.
+        """
+        model = self.sourceModel()
+        name = model.keys[row_num]
+        r = re.search(self.pattern, to_text_string(name))
+
+        if r is None:
+            return False
+        else:
+            return True
+
+    def get_value(self, index):
+        if index.isValid():
+            return self.sourceModel().get_value(self.mapToSource(index))
+
+    def sort(self, column, order=Qt.AscendingOrder):
+        if self.sourceModel():
+            self.sourceModel().sort(column, order=order)
+
+
 class BaseTableView(QTableView):
     """Base collection editor table view"""
     sig_option_changed = Signal(str, object)
@@ -671,6 +785,44 @@ class BaseTableView(QTableView):
         self.delegate = None
         self.setAcceptDrops(True)
         
+        self.finder = None
+        self.proxy_model = CustomSortFilterProxy(self)
+        self.last_regex = ''
+        
+        self.proxy_model.setSourceModel(self.model())
+        self.proxy_model.setDynamicSortFilter(True)
+        self.proxy_model.setFilterKeyColumn(KEY)
+        self.proxy_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
+        self.setModel(self.proxy_model)
+
+        #self.setItemDelegateForColumn(NAME, HTMLDelegate(self, margin=9)) #TODO Prikers
+        #self.setSelectionBehavior(QAbstractItemView.SelectRows)
+        #self.setSelectionMode(QAbstractItemView.SingleSelection)
+        self.setSortingEnabled(True)
+        self.setEditTriggers(QAbstractItemView.AllEditTriggers)
+        self.selectionModel().selectionChanged.connect(self.selection)
+
+    def set_regex(self, regex=None, reset=False):
+        """Update the regex text for the shortcut finder."""
+        if reset:
+            text = ''
+        else:
+            text = self.finder.text().replace(' ', '').lower()
+
+        self.proxy_model.set_filter(text)
+        self.model.update_search_letters(text)
+        self.sortByColumn(SCORE, Qt.AscendingOrder)
+
+        if self.last_regex != regex:
+            self.selectRow(0)
+        self.last_regex = regex
+
+    # TODO Prikers
+    def selection(self, index):
+        """Update selected row."""
+        self.update()
+        self.isActiveWindow()
+        
     def setup_table(self):
         """Setup table"""
         self.horizontalHeader().setStretchLastSection(True)
@@ -679,7 +831,7 @@ class BaseTableView(QTableView):
         self.setSortingEnabled(True)
         self.sortByColumn(KEY, Qt.AscendingOrder)
         # Hiding score column
-        self.hideColumn(SCORE)
+        #self.hideColumn(SCORE) # TODO HIDE
     
     def setup_menu(self, minmax):
         """Setup context menu"""
@@ -806,7 +958,8 @@ class BaseTableView(QTableView):
             
     def refresh_menu(self):
         """Refresh context menu"""
-        index = self.currentIndex()
+        #index = self.currentIndex() # TODO Prikers
+        index = self.proxy_model.mapToSource(self.currentIndex())
         condition = index.isValid()
         self.edit_action.setEnabled( condition )
         self.remove_action.setEnabled( condition )
@@ -934,7 +1087,8 @@ class BaseTableView(QTableView):
     @Slot()
     def edit_item(self):
         """Edit item"""
-        index = self.currentIndex()
+        index = self.proxy_model.mapToSource(self.currentIndex())
+        #index = self.currentIndex() # TODO Prikers
         if not index.isValid():
             return
         self.edit(index.child(index.row(), VALUE))
@@ -942,7 +1096,9 @@ class BaseTableView(QTableView):
     @Slot()
     def remove_item(self):
         """Remove item"""
-        indexes = self.selectedIndexes()
+        indexes = [self.proxy_model.mapToSource(index) for index in
+                   self.selectedIndexes()]
+        #indexes = self.selectedIndexes() # TODO Prikers
         if not indexes:
             return
         for index in indexes:
@@ -960,7 +1116,9 @@ class BaseTableView(QTableView):
 
     def copy_item(self, erase_original=False):
         """Copy item"""
-        indexes = self.selectedIndexes()
+        indexes = [self.proxy_model.mapToSource(index) for index in
+                   self.selectedIndexes()]
+        #indexes = self.selectedIndexes() # TODO Prikers
         if not indexes:
             return
         idx_rows = unsorted_unique([idx.row() for idx in indexes])
@@ -996,7 +1154,8 @@ class BaseTableView(QTableView):
     @Slot()
     def insert_item(self):
         """Insert item"""
-        index = self.currentIndex()
+        index = self.proxy_model.mapToSource(self.currentIndex())
+        #index = self.currentIndex()  # TODO Prikers
         if not index.isValid():
             row = self.model.rowCount()
         else:
@@ -1036,7 +1195,8 @@ class BaseTableView(QTableView):
 
     def plot_item(self, funcname):
         """Plot item"""
-        index = self.currentIndex()
+        index = self.proxy_model.mapToSource(self.currentIndex())
+        #index = self.currentIndex()  # TODO Prikers
         if self.__prepare_plot():
             key = self.model.get_key(index)
             try:
@@ -1050,7 +1210,8 @@ class BaseTableView(QTableView):
     @Slot()
     def imshow_item(self):
         """Imshow item"""
-        index = self.currentIndex()
+        index = self.proxy_model.mapToSource(self.currentIndex())
+        #index = self.currentIndex()  # TODO Prikers
         if self.__prepare_plot():
             key = self.model.get_key(index)
             try:
@@ -1077,7 +1238,8 @@ class BaseTableView(QTableView):
         self.redirect_stdio.emit(True)
         if filename:
             self.array_filename = filename
-            data = self.delegate.get_value( self.currentIndex() )
+            index = self.proxy_model.mapToSource(self.currentIndex())
+            data = self.delegate.get_value(index)
             try:
                 import numpy as np
                 np.save(self.array_filename, data)
@@ -1092,7 +1254,9 @@ class BaseTableView(QTableView):
         """Copy text to clipboard"""
         clipboard = QApplication.clipboard()
         clipl = []
-        for idx in self.selectedIndexes():
+        indexes = [self.proxy_model.mapToSource(index) for index in
+                   self.selectedIndexes()]
+        for idx in indexes:
             if not idx.isValid():
                 continue
             obj = self.delegate.get_value(idx)
@@ -1165,7 +1329,9 @@ class CollectionsEditorTableView(BaseTableView):
                                 else CollectionsModel
         self.model = CollectionsModelClass(self, data, title, names=names,
                                            minmax=minmax)
-        self.setModel(self.model)
+        # self.setModel(self.model)  # TODO Prikers
+        self.proxy_model.setSourceModel(self.model)
+        self.setModel(self.proxy_model)
         self.delegate = CollectionsDelegate(self)
         self.setItemDelegate(self.delegate)
 
@@ -1380,9 +1546,16 @@ class RemoteCollectionsDelegate(CollectionsDelegate):
 
     def get_value(self, index):
         if index.isValid():
-            name = index.model().keys[index.row()]
+            #name = index.model().keys[index.row()] # TODO Prikers
+            #return self.parent().get_value(name) # TODO Prikers
+            model = index.model()
+            if isinstance(model, CustomSortFilterProxy):
+                source_model = model.sourceModel()
+                name = source_model.keys[model.mapToSource(index).row()]
+            else:
+                name = model.keys[index.row()]
             return self.parent().get_value(name)
-    
+
     def set_value(self, index, value):
         if index.isValid():
             name = index.model().keys[index.row()]
@@ -1406,14 +1579,16 @@ class RemoteCollectionsEditorTableView(BaseTableView):
                                       minmax=minmax,
                                       dataframe_format=dataframe_format,
                                       remote=True)
-        self.setModel(self.model)
-
+        #self.setModel(self.model) # TODO (remove ?)
+        self.proxy_model.setSourceModel(self.model)
+        self.setModel(self.proxy_model)
+        
         self.delegate = RemoteCollectionsDelegate(self)
         self.setItemDelegate(self.delegate)
 
         self.setup_table()
         self.menu = self.setup_menu(minmax)
-
+            
     #------ Remote/local API --------------------------------------------------
     def get_value(self, name):
         """Get the value of a variable"""
