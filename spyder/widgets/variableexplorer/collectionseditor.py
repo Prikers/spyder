@@ -34,7 +34,7 @@ from qtpy.QtWidgets import (QAbstractItemDelegate, QApplication, QDateEdit,
                             QDateTimeEdit, QDialog, QDialogButtonBox,
                             QInputDialog, QItemDelegate, QLineEdit, QMenu,
                             QMessageBox, QTableView, QVBoxLayout, QWidget,
-                            QAbstractItemView)
+                            QAbstractItemView, QLabel, QHBoxLayout)
 
 # Local import
 from spyder.config.base import _
@@ -77,9 +77,6 @@ ROWS_TO_LOAD = 50
 KEY, TYPE, SIZE, VALUE, SCORE = [0, 1, 2, 3, 4]
 N_COLS = 5
 
-VALID_ACCENT_CHARS = "ÁÉÍOÚáéíúóàèìòùÀÈÌÒÙâêîôûÂÊÎÔÛäëïöüÄËÏÖÜñÑ"
-VALID_FINDER_CHARS = "[A-Za-z0-9\s{0}_]".format(VALID_ACCENT_CHARS)
-
 
 class ProxyObject(object):
     """Dictionary proxy to an unknown object."""
@@ -111,6 +108,8 @@ class VariableFinder(QLineEdit):
         self._parent = parent
 
         # Widget setup
+        VALID_ACCENT_CHARS = "ÁÉÍOÚáéíúóàèìòùÀÈÌÒÙâêîôûÂÊÎÔÛäëïöüÄËÏÖÜñÑ"
+        VALID_FINDER_CHARS = "[A-Za-z0-9\s{0}_]".format(VALID_ACCENT_CHARS)
         regex = QRegExp(VALID_FINDER_CHARS + "{100}")
         self.setValidator(QRegExpValidator(regex))
 
@@ -406,7 +405,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
     def update_search_letters(self, text):
         """Update search letters with text input in search box."""
         self.letters = text
-        names = self.keys
+        names = [to_text_string(key) for key in self.keys]
         results = get_search_scores(text, names, template='<b>{0}</b>')
         _, _, self.scores = zip(*results) # TODO rich_text
         self.reset()
@@ -459,10 +458,7 @@ class CollectionsDelegate(QItemDelegate):
         
     def get_value(self, index):
         if index.isValid():
-            #proxy_model = index.model() # TODO 2
-            #return proxy_model.sourceModel().get_value(  # TODO 2
-            #        proxy_model.mapToSource(index))   # TODO 2
-            return index.model().get_value(index)  # TODO Prikers
+            return index.model().get_value(index)
 
     def set_value(self, index, value):
         if index.isValid():
@@ -516,10 +512,12 @@ class CollectionsDelegate(QItemDelegate):
                                    "<i>%s</i>"
                                    ) % to_text_string(msg))
             return
-        #key = index.model().get_key(index)  # TODO Prikers
-        proxy_model = index.model()
-        model = proxy_model.sourceModel()
-        key = model.get_key(proxy_model.mapToSource(index))
+
+        if isinstance(index.model(), CustomSortFilterProxy):
+            model = index.model().sourceModel()
+        else:
+            model = index.model()
+        key = model.get_key(index)  # TODO Prikers
         
         readonly = isinstance(value, (tuple, set)) or self.parent().readonly \
                    or not is_known_type(value)
@@ -746,6 +744,14 @@ class CustomSortFilterProxy(QSortFilterProxyModel):
         if index.isValid():
             return self.sourceModel().get_value(self.mapToSource(index))
 
+    def set_value(self, index, value):
+        if index.isValid():
+            if not self._parent.readonly:
+                self.sourceModel().set_value(self.mapToSource(index), value)
+
+    def get_key(self, index):
+        return self.sourceModel().get_key(self.mapToSource(index))
+
     def sort(self, column, order=Qt.AscendingOrder):
         if self.sourceModel():
             self.sourceModel().sort(column, order=order)
@@ -787,9 +793,6 @@ class BaseTableView(QTableView):
         self.proxy_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
         self.setModel(self.proxy_model)
 
-        #self.setItemDelegateForColumn(NAME, HTMLDelegate(self, margin=9)) #TODO Prikers
-        #self.setSelectionBehavior(QAbstractItemView.SelectRows)
-        #self.setSelectionMode(QAbstractItemView.SingleSelection)
         self.setSortingEnabled(True)
         self.setEditTriggers(QAbstractItemView.AllEditTriggers)
         self.selectionModel().selectionChanged.connect(self.selection)
@@ -839,7 +842,7 @@ class BaseTableView(QTableView):
         self.setSortingEnabled(True)
         self.sortByColumn(KEY, Qt.AscendingOrder)
         # Hiding score column
-        #self.hideColumn(SCORE) # TODO HIDE
+        self.hideColumn(SCORE)
     
     def setup_menu(self, minmax):
         """Setup context menu"""
@@ -966,8 +969,8 @@ class BaseTableView(QTableView):
             
     def refresh_menu(self):
         """Refresh context menu"""
-        #index = self.currentIndex() # TODO Prikers
-        index = self.proxy_model.mapToSource(self.currentIndex())
+        index = self.currentIndex() # TODO Prikers
+        #index = self.proxy_model.mapToSource(self.currentIndex())
         condition = index.isValid()
         self.edit_action.setEnabled( condition )
         self.remove_action.setEnabled( condition )
@@ -1206,8 +1209,8 @@ class BaseTableView(QTableView):
 
     def plot_item(self, funcname):
         """Plot item"""
-        index = self.proxy_model.mapToSource(self.currentIndex())
-        #index = self.currentIndex()  # TODO Prikers
+        #index = self.proxy_model.mapToSource(self.currentIndex())
+        index = self.currentIndex()  # TODO Prikers
         if self.__prepare_plot():
             key = self.model.get_key(index)
             try:
@@ -1221,8 +1224,8 @@ class BaseTableView(QTableView):
     @Slot()
     def imshow_item(self):
         """Imshow item"""
-        index = self.proxy_model.mapToSource(self.currentIndex())
-        #index = self.currentIndex()  # TODO Prikers
+        #index = self.proxy_model.mapToSource(self.currentIndex())
+        index = self.currentIndex()  # TODO Prikers
         if self.__prepare_plot():
             key = self.model.get_key(index)
             try:
@@ -1351,7 +1354,7 @@ class CollectionsEditorTableView(BaseTableView):
 
         if isinstance(data, set):
             self.horizontalHeader().hideSection(KEY)
-
+        
     #------ Remote/local API --------------------------------------------------
     def remove_values(self, keys):
         """Remove values from data"""
@@ -1514,8 +1517,19 @@ class CollectionsEditor(QDialog):
         self.widget = CollectionsEditorWidget(self, self.data_copy, title=title,
                                               readonly=readonly, remote=remote)
 
+        self.finder = VariableFinder(self.widget.editor,
+                                     self.widget.editor.set_regex)
+        self.widget.editor.finder = self.finder
+        self.label_finder = QLabel(_('Search: '))
+        
         layout = QVBoxLayout()
-        layout.addWidget(self.widget)
+        layout_editor = QVBoxLayout()
+        layout_editor.addWidget(self.widget)
+        layout_finder = QHBoxLayout()
+        layout_finder.addWidget(self.label_finder)
+        layout_finder.addWidget(self.finder)
+        layout.addLayout(layout_editor)
+        layout.addLayout(layout_finder)
         self.setLayout(layout)
         
         # Buttons configuration
@@ -1569,7 +1583,12 @@ class RemoteCollectionsDelegate(CollectionsDelegate):
 
     def set_value(self, index, value):
         if index.isValid():
-            name = index.model().keys[index.row()]
+            model = index.model()
+            if isinstance(model, CustomSortFilterProxy):
+                source_model = model.sourceModel()
+                name = source_model.keys[model.mapToSource(index).row()]
+            else:
+                name = model.keys[index.row()]
             self.parent().new_value(name, value)
 
 
