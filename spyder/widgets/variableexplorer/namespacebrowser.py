@@ -396,6 +396,7 @@ class NamespaceBrowser(QWidget):
         for index in range(self.hlayout2.count()):
             if state and self.isVisible() or not state:
                 self.hlayout2.itemAt(index).widget().setVisible(state)
+        self.finder.setFocus()
 
     def find_previous(self):
         data = self.editor.model.showndata.keys()

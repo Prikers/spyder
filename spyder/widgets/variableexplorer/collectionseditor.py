@@ -78,7 +78,7 @@ KEY, TYPE, SIZE, VALUE, SCORE = [0, 1, 2, 3, 4]
 N_COLS = 5
 
 VALID_ACCENT_CHARS = "ÁÉÍOÚáéíúóàèìòùÀÈÌÒÙâêîôûÂÊÎÔÛäëïöüÄËÏÖÜñÑ"
-VALID_FINDER_CHARS = "[A-Za-z\s{0}_]".format(VALID_ACCENT_CHARS)
+VALID_FINDER_CHARS = "[A-Za-z0-9\s{0}_]".format(VALID_ACCENT_CHARS)
 
 
 class ProxyObject(object):
@@ -132,7 +132,7 @@ class VariableFinder(QLineEdit):
         elif key in [Qt.Key_Down]:
             self._parent.next_row()
         elif key in [Qt.Key_Enter, Qt.Key_Return]:
-            self._parent.show_editor()
+            self._parent.edit_item()
         else:
             super(VariableFinder, self).keyPressEvent(event)
 
@@ -162,8 +162,6 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
         self.scores = []
         self.set_data(data)
         self.letters = ''
-        self.normal_text = []
-        #self.rich_text = [] #TODO
         
     def get_data(self):
         """Return model data"""
@@ -410,7 +408,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
         self.letters = text
         names = self.keys
         results = get_search_scores(text, names, template='<b>{0}</b>')
-        self.normal_text, _, self.scores = zip(*results) # TODO
+        _, _, self.scores = zip(*results) # TODO rich_text
         self.reset()
 
 
@@ -795,7 +793,7 @@ class BaseTableView(QTableView):
         self.setSortingEnabled(True)
         self.setEditTriggers(QAbstractItemView.AllEditTriggers)
         self.selectionModel().selectionChanged.connect(self.selection)
-
+        
     def set_regex(self, regex=None, reset=False):
         """Update the regex text for the shortcut finder."""
         if reset:
@@ -811,6 +809,22 @@ class BaseTableView(QTableView):
             self.selectRow(0)
         self.last_regex = regex
 
+    def next_row(self):
+        """Move to next row from currently selected row."""
+        row = self.currentIndex().row()
+        rows = self.proxy_model.rowCount()
+        if row + 1 == rows:
+            row = -1
+        self.selectRow(row + 1)
+
+    def previous_row(self):
+        """Move to previous row from currently selected row."""
+        row = self.currentIndex().row()
+        rows = self.proxy_model.rowCount()
+        if row == 0:
+            row = rows
+        self.selectRow(row - 1)
+        
     # TODO Prikers
     def selection(self, index):
         """Update selected row."""
@@ -1023,6 +1037,10 @@ class BaseTableView(QTableView):
             self.copy()
         elif event == QKeySequence.Paste:
             self.paste()
+        elif event.key() in [Qt.Key_Up, Qt.Key_Down]:
+            super(BaseTableView, self).keyPressEvent(event)
+        elif event.key() in [Qt.Key_Enter, Qt.Key_Return]:
+            self.edit_item()
         else:
             QTableView.keyPressEvent(self, event)
         
@@ -1081,8 +1099,7 @@ class BaseTableView(QTableView):
     @Slot()
     def edit_item(self):
         """Edit item"""
-        index = self.proxy_model.mapToSource(self.currentIndex())
-        #index = self.currentIndex() # TODO Prikers
+        index = self.currentIndex()
         if not index.isValid():
             return
         self.edit(index.child(index.row(), VALUE))
@@ -1681,7 +1698,7 @@ class RemoteCollectionsEditorTableView(BaseTableView):
         menu = BaseTableView.setup_menu(self, minmax)
         return menu
 
-
+        
 # =============================================================================
 # Tests
 # =============================================================================
