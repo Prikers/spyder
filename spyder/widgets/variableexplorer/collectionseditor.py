@@ -280,10 +280,12 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.types = sort_against(self.types, values, reverse)
             self.scores = sort_against(self.scores, values, reverse)
         elif column == SCORE:
-            order = sorted(zip(self.scores, self.keys, self.sizes, self.types),
+            keys = self.keys[:self.rows_loaded]
+            order = sorted(zip(self.scores, keys, self.sizes, self.types),
                            key=lambda x: x[0], reverse=reverse)
-            self.scores, self.keys, self.sizes, self.types = [
-                list(result) for result in zip(*order)]
+            self.scores, keys, self.sizes, self.types = [list(result) for 
+                                                         result in zip(*order)]
+            self.keys[:self.rows_loaded] = keys
         self.beginResetModel()
         self.endResetModel()
 
