@@ -32,7 +32,7 @@ from spyder.utils.programs import is_module_installed
 from spyder.utils.qthelpers import (add_actions, create_action,
                                     create_toolbutton, create_plugin_layout)
 from spyder.widgets.variableexplorer.collectionseditor import (
-    RemoteCollectionsEditorTableView)
+    RemoteCollectionsEditorTableView, VariableFinder)
 from spyder.widgets.variableexplorer.importwizard import ImportWizard
 from spyder.widgets.variableexplorer.utils import REMOTE_SETTINGS
 
@@ -64,6 +64,7 @@ class NamespaceBrowser(QWidget):
         
         # Other setting
         self.dataframe_format = None
+        self.search_toolbar = False
 
         self.editor = None
         self.exclude_private_action = None
@@ -80,7 +81,7 @@ class NamespaceBrowser(QWidget):
     def setup(self, check_all=None, exclude_private=None,
               exclude_uppercase=None, exclude_capitalized=None,
               exclude_unsupported=None, excluded_names=None,
-              minmax=None, dataframe_format=None):
+              minmax=None, dataframe_format=None, search_toolbar=False):
         """
         Setup the namespace browser with provided settings.
 
@@ -118,13 +119,24 @@ class NamespaceBrowser(QWidget):
 
         self.editor.sig_option_changed.connect(self.sig_option_changed.emit)
         self.editor.sig_files_dropped.connect(self.import_data)
+        
+        self.finder = VariableFinder(self.editor, self.editor.set_regex)
+        self.editor.finder = self.finder
 
         # Setup layout
-        blayout = QHBoxLayout()
-        toolbar = self.setup_toolbar(exclude_private, exclude_uppercase,
-                                     exclude_capitalized, exclude_unsupported)
-        for widget in toolbar:
-            blayout.addWidget(widget)
+        self.hlayout1 = QHBoxLayout()
+        self.hlayout2 = QHBoxLayout()
+        vlayout = QVBoxLayout()
+        layout1, layout2 = self.setup_toolbar(
+                exclude_private, exclude_uppercase,
+                exclude_capitalized, exclude_unsupported)
+        for widget in layout1:
+            self.hlayout1.addWidget(widget)
+        for widget in layout2:
+            self.hlayout2.addWidget(widget)
+        vlayout.setContentsMargins(0, 0, 0, 0)
+        vlayout.addLayout(self.hlayout1)
+        vlayout.addLayout(self.hlayout2)
 
         # Options menu
         editor = self.editor
@@ -146,10 +158,11 @@ class NamespaceBrowser(QWidget):
         add_actions(self.menu, self.actions)
         self.options_button.setMenu(self.menu)
 
-        blayout.addStretch()
-        blayout.addWidget(self.options_button)
+        self.hlayout1.addStretch()
+        self.hlayout1.addWidget(self.options_button)
 
-        layout = create_plugin_layout(blayout, self.editor)
+        layout = create_plugin_layout(vlayout, self.editor)
+        self.show_search_toolbar(search_toolbar)
         self.setLayout(layout)
 
         self.sig_option_changed.connect(self.option_changed)
@@ -167,8 +180,8 @@ class NamespaceBrowser(QWidget):
                       exclude_capitalized, exclude_unsupported):
         """Setup toolbar"""
         self.setup_in_progress = True
-        toolbar = []
 
+        # Layout 1
         load_button = create_toolbutton(self, text=_('Import data'),
                                         icon=ima.icon('fileimport'),
                                         triggered=lambda: self.import_data())
@@ -184,8 +197,11 @@ class NamespaceBrowser(QWidget):
                 self, text=_("Reset the namespace"),
                 icon=ima.icon('editclear'), triggered=self.reset_namespace)
 
-        toolbar += [load_button, self.save_button, save_as_button,
-                    reset_namespace_button]
+        self.search_button = create_toolbutton(
+                self, text=_("Search a variable"), icon=ima.icon('find'),
+                toggled=self.show_search_toolbar)
+        self.search_button.setCheckable(True)
+        self.search_button.setChecked(self.search_toolbar)
 
         self.exclude_private_action = create_action(self,
                 _("Exclude private references"),
@@ -217,7 +233,18 @@ class NamespaceBrowser(QWidget):
                 toggled=lambda state:
                 self.sig_option_changed.emit('exclude_unsupported', state))
         self.exclude_unsupported_action.setChecked(exclude_unsupported)
-        
+
+        layout1 = [load_button, self.save_button, save_as_button,
+           reset_namespace_button, self.search_button]
+
+        # Layout 2
+        close_button = create_toolbutton(
+                self, text=_("Close toolbar"),
+                icon=ima.icon('DialogCloseButton'), triggered=self.hide)
+
+        layout2 = [self.finder, close_button]
+
+        toolbar = (layout1, layout2)
         self.setup_in_progress = False
         
         return toolbar
@@ -366,3 +393,14 @@ class NamespaceBrowser(QWidget):
                             _("<b>Unable to save current workspace</b>"
                               "<br><br>Error message:<br>%s") % error_message)
         self.save_button.setEnabled(self.filename is not None)
+
+    @Slot(bool)
+    def show_search_toolbar(self, state):
+        for index in range(self.hlayout2.count()):
+            if state and self.isVisible() or not state:
+                self.hlayout2.itemAt(index).widget().setVisible(state)
+        self.finder.setFocus()
+
+    def hide(self):
+        self.show_search_toolbar
+        self.search_button.setChecked(not self.search_button.isChecked())

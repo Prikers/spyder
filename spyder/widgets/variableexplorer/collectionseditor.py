@@ -27,8 +27,8 @@ import ipykernel.pickleutil
 from ipykernel.serialize import serialize_object
 from qtpy.compat import getsavefilename, to_qvariant
 from qtpy.QtCore import (QAbstractTableModel, QDateTime, QModelIndex, Qt,
-                         Signal, Slot)
-from qtpy.QtGui import QColor, QKeySequence
+                         Signal, Slot, QRegExp)
+from qtpy.QtGui import QColor, QKeySequence, QRegExpValidator
 from qtpy.QtWidgets import (QAbstractItemDelegate, QApplication, QDateEdit,
                             QDateTimeEdit, QDialog, QDialogButtonBox,
                             QInputDialog, QItemDelegate, QLineEdit, QMenu,
@@ -93,6 +93,29 @@ class ProxyObject(object):
             setattr(self.__obj__, key, value)
         except TypeError:
             pass
+
+
+class VariableFinder(QLineEdit):
+    """Textbox for filtering variables in the variable explorer and editors."""
+    def __init__(self, parent, callback=None):
+        super(VariableFinder, self).__init__(parent)
+        self._parent = parent
+
+        # Widget setup
+        VALID_ACCENT_CHARS = "ÁÉÍOÚáéíúóàèìòùÀÈÌÒÙâêîôûÂÊÎÔÛäëïöüÄËÏÖÜñÑ"
+        VALID_FINDER_CHARS = "[A-Za-z0-9\s{0}_]".format(VALID_ACCENT_CHARS)
+        regex = QRegExp(VALID_FINDER_CHARS + "{100}")
+        self.setValidator(QRegExpValidator(regex))
+
+        # Signals
+        if callback:
+            self.textChanged.connect(callback)
+
+    def set_text(self, text):
+        """Set the filter text."""
+        text = text.strip()
+        new_text = self.text() + text
+        self.setText(new_text)
 
 
 class ReadOnlyCollectionsModel(QAbstractTableModel):
@@ -1145,6 +1168,9 @@ class BaseTableView(QTableView):
         else:
             QMessageBox.warning(self, _( "Empty clipboard"),
                                 _("Nothing to be imported from clipboard."))
+
+    def set_regex(self, regex=None, reset=False):
+        pass
 
 
 class CollectionsEditorTableView(BaseTableView):
