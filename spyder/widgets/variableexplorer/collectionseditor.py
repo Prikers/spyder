@@ -20,6 +20,7 @@ Collections (i.e. dictionary, list, set and tuple) editor widget and dialog
 from __future__ import print_function
 import datetime
 import gc
+import re
 import sys
 
 # Third party imports
@@ -27,7 +28,7 @@ import ipykernel.pickleutil
 from ipykernel.serialize import serialize_object
 from qtpy.compat import getsavefilename, to_qvariant
 from qtpy.QtCore import (QAbstractTableModel, QDateTime, QModelIndex, Qt,
-                         Signal, Slot, QRegExp)
+                         Signal, Slot, QRegExp, QSortFilterProxyModel)
 from qtpy.QtGui import QColor, QKeySequence, QRegExpValidator
 from qtpy.QtWidgets import (QAbstractItemDelegate, QApplication, QDateEdit,
                             QDateTimeEdit, QDialog, QDialogButtonBox,
@@ -44,6 +45,7 @@ from spyder.utils import icon_manager as ima
 from spyder.utils.misc import fix_reference_name, getcwd_or_home
 from spyder.utils.qthelpers import (add_actions, create_action,
                                     mimedata2url)
+from spyder.utils.stringmatching import get_search_scores, get_search_regex 
 from spyder.widgets.variableexplorer.importwizard import ImportWizard
 from spyder.widgets.variableexplorer.texteditor import TextEditor
 from spyder.widgets.variableexplorer.utils import (
@@ -677,6 +679,37 @@ class CollectionsDelegate(QItemDelegate):
             # Should not happen...
             raise RuntimeError("Unsupported editor widget")
         self.set_value(index, value)
+
+
+class CustomSortFilterProxy(QSortFilterProxyModel):
+    """Custom column filter based on regex."""
+    def __init__(self, parent=None):
+        super(CustomSortFilterProxy, self).__init__(parent)
+        self._parent = parent
+        self.pattern = re.compile(u'')
+
+    def set_filter(self, text):
+        """Set regular expression for filter."""
+        self.pattern = get_search_regex(text)
+        if self.pattern and text:
+            self._parent.setSortingEnabled(False)
+        else:
+            self._parent.setSortingEnabled(True)
+        self.invalidateFilter()
+
+    def filterAcceptsRow(self, row_num, parent):
+        """Qt override.
+
+        Reimplemented from base class to allow the use of custom filtering.
+        """
+        model = self.sourceModel()
+        name = model.keys[row_num]
+        r = re.search(self.pattern, to_text_string(name))
+
+        if r is None:
+            return False
+        else:
+            return True
 
 
 class BaseTableView(QTableView):
