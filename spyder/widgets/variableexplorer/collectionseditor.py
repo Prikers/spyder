@@ -33,7 +33,8 @@ from qtpy.QtGui import QColor, QKeySequence, QRegExpValidator
 from qtpy.QtWidgets import (QAbstractItemDelegate, QApplication, QDateEdit,
                             QDateTimeEdit, QDialog, QDialogButtonBox,
                             QInputDialog, QItemDelegate, QLineEdit, QMenu,
-                            QMessageBox, QTableView, QVBoxLayout, QWidget)
+                            QMessageBox, QTableView, QVBoxLayout, QWidget,
+                            QAbstractItemView)
 
 # Local import
 from spyder.config.base import _
@@ -145,6 +146,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
         self.sizes = []
         self.types = []
         self.scores = []
+        self.letters = ''
         self.set_data(data)
         
     def get_data(self):
@@ -385,9 +387,18 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             return Qt.ItemIsEnabled
         return Qt.ItemFlags(QAbstractTableModel.flags(self, index)|
                             Qt.ItemIsEditable)
+
     def reset(self):
         self.beginResetModel()
         self.endResetModel()
+
+    def update_search_letters(self, text):
+        """Update search letters with text input in search box."""
+        self.letters = text
+        names = [to_text_string(key) for key in self.keys]
+        results = get_search_scores(text, names, template='<b>{0}</b>')
+        _, _, self.scores = zip(*results) # TODO rich_text
+        self.reset()
 
 
 class CollectionsModel(ReadOnlyCollectionsModel):
@@ -404,7 +415,7 @@ class CollectionsModel(ReadOnlyCollectionsModel):
     def get_bgcolor(self, index):
         """Background color depending on value"""
         value = self.get_value(index)
-        if index.column() in (KEY, TYPE, SIZE):
+        if index.column() != VALUE:
             color = ReadOnlyCollectionsModel.get_bgcolor(self, index)
         else:
             if self.remote:
@@ -737,7 +748,21 @@ class BaseTableView(QTableView):
         self.duplicate_action = None
         self.delegate = None
         self.setAcceptDrops(True)
-        
+
+        self.finder = None
+        self.proxy_model = CustomSortFilterProxy(self)
+        self.last_regex = ''
+
+        self.proxy_model.setSourceModel(self.model())
+        self.proxy_model.setDynamicSortFilter(True)
+        self.proxy_model.setFilterKeyColumn(KEY)
+        self.proxy_model.setFilterCaseSensitivity(Qt.CaseInsensitive)
+        self.setModel(self.proxy_model)
+
+        self.setSortingEnabled(True)
+        self.setEditTriggers(QAbstractItemView.AllEditTriggers)
+        self.selectionModel().selectionChanged.connect(self.selection)
+
     def setup_table(self):
         """Setup table"""
         self.horizontalHeader().setStretchLastSection(True)
@@ -1221,7 +1246,24 @@ class BaseTableView(QTableView):
                                 _("Nothing to be imported from clipboard."))
 
     def set_regex(self, regex=None, reset=False):
-        pass
+        """Update the regex text for the variable finder."""
+        if reset:
+            text = ''
+        else:
+            text = self.finder.text().replace(' ', '').lower()
+
+        self.proxy_model.set_filter(text)
+        self.model.update_search_letters(text)
+        self.sortByColumn(SCORE, Qt.AscendingOrder)
+
+        if self.last_regex != regex:
+            self.selectRow(0)
+        self.last_regex = regex
+
+    def selection(self, index):
+        """Update selected row."""
+        self.update()
+        self.isActiveWindow()
 
 
 class CollectionsEditorTableView(BaseTableView):
