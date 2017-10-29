@@ -19,7 +19,8 @@ import pytest
 
 # Local imports
 from spyder.widgets.variableexplorer.collectionseditor import (
-    CollectionsEditorTableView, CollectionsModel, LARGE_NROWS, ROWS_TO_LOAD)
+    CollectionsEditorTableView, CollectionsModel, LARGE_NROWS, ROWS_TO_LOAD,
+    KEY, TYPE, SIZE, VALUE, SCORE, N_COLS)
 from spyder.widgets.variableexplorer.tests.test_dataframeeditor import \
     generate_pandas_indexes
 
@@ -61,32 +62,32 @@ def test_collectionsmodel_with_two_ints():
     coll = {'x': 1, 'y': 2}
     cm = CollectionsModel(None, coll)
     assert cm.rowCount() == 2
-    assert cm.columnCount() == 5
+    assert cm.columnCount() == N_COLS
     # dict is unordered, so first row might be x or y
-    assert data(cm, 0, 0) in {'x', 'y'}
-    if data(cm, 0, 0) == 'x':
+    assert data(cm, 0, KEY) in {'x', 'y'}
+    if data(cm, 0, KEY) == 'x':
         row_with_x = 0
         row_with_y = 1
     else:
         row_with_x = 1
         row_with_y = 0
-    assert data(cm, row_with_x, 1) == 'int'
-    assert data(cm, row_with_x, 2) == '1'
-    assert data(cm, row_with_x, 3) == '1'
-    assert data(cm, row_with_y, 0) == 'y'
-    assert data(cm, row_with_y, 1) == 'int'
-    assert data(cm, row_with_y, 2) == '1'
-    assert data(cm, row_with_y, 3) == '2'
+    assert data(cm, row_with_x, TYPE) == 'int'
+    assert data(cm, row_with_x, SIZE) == '1'
+    assert data(cm, row_with_x, VALUE) == '1'
+    assert data(cm, row_with_y, KEY) == 'y'
+    assert data(cm, row_with_y, TYPE) == 'int'
+    assert data(cm, row_with_y, SIZE) == '1'
+    assert data(cm, row_with_y, VALUE) == '2'
 
 def test_collectionsmodel_with_index():
     # Regression test for issue #3380, modified for #3758
     for rng_name, rng in generate_pandas_indexes().items():
         coll = {'rng': rng}
         cm = CollectionsModel(None, coll)
-        assert data(cm, 0, 0) == 'rng'
-        assert data(cm, 0, 1) == rng_name
-        assert data(cm, 0, 2) == '(20,)' or data(cm, 0, 2) == '(20L,)'
-        assert data(cm, 0, 3) == rng.summary()
+        assert data(cm, 0, KEY) == 'rng'
+        assert data(cm, 0, TYPE) == rng_name
+        assert data(cm, 0, SIZE) == '(20,)' or data(cm, 0, 2) == '(20L,)'
+        assert data(cm, 0, VALUE) == rng.summary()
 
 def test_shows_dataframeeditor_when_editing_index(qtbot, monkeypatch):
     for rng_name, rng in generate_pandas_indexes().items():
@@ -105,8 +106,8 @@ def test_sort_collectionsmodel():
     coll = [1, 3, 2]
     cm = CollectionsModel(None, coll)
     assert cm.rowCount() == 3
-    assert cm.columnCount() == 5
-    cm.sort(0)  # sort by index
+    assert cm.columnCount() == N_COLS
+    cm.sort(KEY)  # sort by index
     assert data_table(cm, 3, 4) == [['0', '1', '2'],
                                     ['int', 'int', 'int'],
                                     ['1', '1', '1'],
@@ -119,8 +120,8 @@ def test_sort_collectionsmodel():
     coll = [[1, 2], 3]
     cm = CollectionsModel(None, coll)
     assert cm.rowCount() == 2
-    assert cm.columnCount() == 5
-    cm.sort(1)  # sort by type
+    assert cm.columnCount() == N_COLS
+    cm.sort(TYPE)  # sort by type
     assert data_table(cm, 2, 4) == [['1', '0'],
                                     ['int', 'list'],
                                     ['1', '2'],
@@ -136,8 +137,8 @@ def test_sort_collectionsmodel_with_many_rows():
     coll = list(range(2*LARGE_NROWS))
     cm = CollectionsModel(None, coll)
     assert cm.rowCount() == cm.rows_loaded == ROWS_TO_LOAD
-    assert cm.columnCount() == 5
-    cm.sort(1)  # This was causing an issue (#5232)
+    assert cm.columnCount() == N_COLS
+    cm.sort(TYPE)  # This was causing an issue (#5232)
     cm.fetchMore()
     assert cm.rowCount() == 2 * ROWS_TO_LOAD
     for _ in range(3):
