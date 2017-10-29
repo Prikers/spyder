@@ -233,6 +233,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
         if column == KEY:
             self.sizes = sort_against(self.sizes, self.keys, reverse)
             self.types = sort_against(self.types, self.keys, reverse)
+            self.scores = sort_against(self.scores, self.keys, reverse)
             try:
                 self.keys.sort(reverse=reverse)
             except:
@@ -241,6 +242,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.keys[:self.rows_loaded] = sort_against(self.keys, self.types,
                                                         reverse)
             self.sizes = sort_against(self.sizes, self.types, reverse)
+            self.scores = sort_against(self.scores, self.types, reverse)
             try:
                 self.types.sort(reverse=reverse)
             except:
@@ -249,6 +251,7 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.keys[:self.rows_loaded] = sort_against(self.keys, self.sizes,
                                                         reverse)
             self.types = sort_against(self.types, self.sizes, reverse)
+            self.scores = sort_against(self.scores, self.sizes, reverse)
             try:
                 self.sizes.sort(reverse=reverse)
             except:
@@ -258,6 +261,14 @@ class ReadOnlyCollectionsModel(QAbstractTableModel):
             self.keys = sort_against(self.keys, values, reverse)
             self.sizes = sort_against(self.sizes, values, reverse)
             self.types = sort_against(self.types, values, reverse)
+            self.scores = sort_against(self.scores, values, reverse)
+        elif column == SCORE:
+            keys = self.keys[:self.rows_loaded]
+            order = sorted(zip(self.scores, keys, self.sizes, self.types),
+                           key=lambda x: x[0], reverse=reverse)
+            self.scores, keys, self.sizes, self.types = [
+                           list(result) for result in zip(*order)]
+            self.keys[:self.rows_loaded] = keys
         self.beginResetModel()
         self.endResetModel()
 
