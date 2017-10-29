@@ -467,8 +467,10 @@ class CollectionsDelegate(QItemDelegate):
         lot of time just to get its value
         """
         try:
-            val_size = index.model().sizes[index.row()]
-            val_type = index.model().types[index.row()]
+            proxy_model = index.model()
+            model = proxy_model.sourceModel()
+            val_size = model.sizes[proxy_model.mapToSource(index).row()]
+            val_type = model.types[proxy_model.mapToSource(index).row()]
         except:
             return False
         if val_type in ['list', 'set', 'tuple', 'dict'] and \
@@ -500,7 +502,12 @@ class CollectionsDelegate(QItemDelegate):
                                    "<i>%s</i>"
                                    ) % to_text_string(msg))
             return
-        key = index.model().get_key(index)
+
+        if isinstance(index.model(), CustomSortFilterProxy):
+            model = index.model().sourceModel()
+        else:
+            model = index.model()
+        key = model.get_key(index)
         readonly = isinstance(value, (tuple, set)) or self.parent().readonly \
                    or not is_known_type(value)
         #---editor = CollectionsEditor
@@ -508,7 +515,7 @@ class CollectionsDelegate(QItemDelegate):
             editor = CollectionsEditor()
             editor.setup(value, key, icon=self.parent().windowIcon(),
                          readonly=readonly)
-            self.create_dialog(editor, dict(model=index.model(), editor=editor,
+            self.create_dialog(editor, dict(model=model, editor=editor,
                                             key=key, readonly=readonly))
             return None
         #---editor = ArrayEditor
@@ -517,7 +524,7 @@ class CollectionsDelegate(QItemDelegate):
             editor = ArrayEditor(parent)
             if not editor.setup_and_check(value, title=key, readonly=readonly):
                 return
-            self.create_dialog(editor, dict(model=index.model(), editor=editor,
+            self.create_dialog(editor, dict(model=model, editor=editor,
                                             key=key, readonly=readonly))
             return None
         #---showing image
@@ -528,7 +535,7 @@ class CollectionsDelegate(QItemDelegate):
             if not editor.setup_and_check(arr, title=key, readonly=readonly):
                 return
             conv_func = lambda arr: Image.fromarray(arr, mode=value.mode)
-            self.create_dialog(editor, dict(model=index.model(), editor=editor,
+            self.create_dialog(editor, dict(model=model, editor=editor,
                                             key=key, readonly=readonly,
                                             conv=conv_func))
             return None
@@ -538,9 +545,9 @@ class CollectionsDelegate(QItemDelegate):
             editor = DataFrameEditor()
             if not editor.setup_and_check(value, title=key):
                 return
-            editor.dataModel.set_format(index.model().dataframe_format)
+            editor.dataModel.set_format(model.dataframe_format)
             editor.sig_option_changed.connect(self.change_option)
-            self.create_dialog(editor, dict(model=index.model(), editor=editor,
+            self.create_dialog(editor, dict(model=model, editor=editor,
                                             key=key, readonly=readonly))
             return None
         #---editor = QDateTimeEdit
@@ -560,7 +567,7 @@ class CollectionsDelegate(QItemDelegate):
             te = TextEditor(None)
             if te.setup_and_check(value):
                 editor = TextEditor(value, key)
-                self.create_dialog(editor, dict(model=index.model(),
+                self.create_dialog(editor, dict(model=model,
                                                 editor=editor, key=key,
                                                 readonly=readonly))
             return None
@@ -580,7 +587,7 @@ class CollectionsDelegate(QItemDelegate):
             editor = CollectionsEditor()
             editor.setup(value, key, icon=self.parent().windowIcon(),
                          readonly=readonly)
-            self.create_dialog(editor, dict(model=index.model(), editor=editor,
+            self.create_dialog(editor, dict(model=model, editor=editor,
                                             key=key, readonly=readonly))
             return None
             
@@ -721,6 +728,22 @@ class CustomSortFilterProxy(QSortFilterProxyModel):
             return False
         else:
             return True
+
+    def get_value(self, index):
+        if index.isValid():
+            return self.sourceModel().get_value(self.mapToSource(index))
+
+    def set_value(self, index, value):
+        if index.isValid():
+            if not self._parent.readonly:
+                self.sourceModel().set_value(self.mapToSource(index), value)
+
+    def get_key(self, index):
+        return self.sourceModel().get_key(self.mapToSource(index))
+
+    def sort(self, column, order=Qt.AscendingOrder):
+        if self.sourceModel():
+            self.sourceModel().sort(column, order=order)
 
 
 class BaseTableView(QTableView):
@@ -1034,7 +1057,8 @@ class BaseTableView(QTableView):
     @Slot()
     def remove_item(self):
         """Remove item"""
-        indexes = self.selectedIndexes()
+        indexes = [self.proxy_model.mapToSource(index) for index in
+                   self.selectedIndexes()]
         if not indexes:
             return
         for index in indexes:
@@ -1052,7 +1076,8 @@ class BaseTableView(QTableView):
 
     def copy_item(self, erase_original=False):
         """Copy item"""
-        indexes = self.selectedIndexes()
+        indexes = [self.proxy_model.mapToSource(index) for index in
+                   self.selectedIndexes()]
         if not indexes:
             return
         idx_rows = unsorted_unique([idx.row() for idx in indexes])
@@ -1088,7 +1113,7 @@ class BaseTableView(QTableView):
     @Slot()
     def insert_item(self):
         """Insert item"""
-        index = self.currentIndex()
+        index = self.proxy_model.mapToSource(self.currentIndex())
         if not index.isValid():
             row = self.model.rowCount()
         else:
@@ -1169,7 +1194,8 @@ class BaseTableView(QTableView):
         self.redirect_stdio.emit(True)
         if filename:
             self.array_filename = filename
-            data = self.delegate.get_value( self.currentIndex() )
+            index = self.proxy_model.mapToSource(self.currentIndex())
+            data = self.delegate.get_value(index)
             try:
                 import numpy as np
                 np.save(self.array_filename, data)
@@ -1184,7 +1210,9 @@ class BaseTableView(QTableView):
         """Copy text to clipboard"""
         clipboard = QApplication.clipboard()
         clipl = []
-        for idx in self.selectedIndexes():
+        indexes = [self.proxy_model.mapToSource(index) for index in
+                   self.selectedIndexes()]
+        for idx in indexes:
             if not idx.isValid():
                 continue
             obj = self.delegate.get_value(idx)
@@ -1277,7 +1305,8 @@ class CollectionsEditorTableView(BaseTableView):
                                 else CollectionsModel
         self.model = CollectionsModelClass(self, data, title, names=names,
                                            minmax=minmax)
-        self.setModel(self.model)
+        self.proxy_model.setSourceModel(self.model)
+        self.setModel(self.proxy_model)
         self.delegate = CollectionsDelegate(self)
         self.setItemDelegate(self.delegate)
 
@@ -1492,12 +1521,22 @@ class RemoteCollectionsDelegate(CollectionsDelegate):
 
     def get_value(self, index):
         if index.isValid():
-            name = index.model().keys[index.row()]
+            model = index.model()
+            if isinstance(model, CustomSortFilterProxy):
+                source_model = model.sourceModel()
+                name = source_model.keys[model.mapToSource(index).row()]
+            else:
+                name = model.keys[index.row()]
             return self.parent().get_value(name)
-    
+
     def set_value(self, index, value):
         if index.isValid():
-            name = index.model().keys[index.row()]
+            model = index.model()
+            if isinstance(model, CustomSortFilterProxy):
+                source_model = model.sourceModel()
+                name = source_model.keys[model.mapToSource(index).row()]
+            else:
+                name = model.keys[index.row()]
             self.parent().new_value(name, value)
 
 
@@ -1518,7 +1557,8 @@ class RemoteCollectionsEditorTableView(BaseTableView):
                                       minmax=minmax,
                                       dataframe_format=dataframe_format,
                                       remote=True)
-        self.setModel(self.model)
+        self.proxy_model.setSourceModel(self.model)
+        self.setModel(self.proxy_model)
 
         self.delegate = RemoteCollectionsDelegate(self)
         self.setItemDelegate(self.delegate)
