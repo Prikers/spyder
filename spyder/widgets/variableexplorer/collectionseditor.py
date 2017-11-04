@@ -971,8 +971,8 @@ class BaseTableView(QTableView):
             
     def refresh_menu(self):
         """Refresh context menu"""
-        index = self.currentIndex() # TODO Prikers
-        #index = self.proxy_model.mapToSource(self.currentIndex())
+        #index = self.currentIndex() # TODO Prikers
+        index = self.proxy_model.mapToSource(self.currentIndex())
         condition = index.isValid()
         self.edit_action.setEnabled( condition )
         self.remove_action.setEnabled( condition )
@@ -1211,8 +1211,8 @@ class BaseTableView(QTableView):
 
     def plot_item(self, funcname):
         """Plot item"""
-        #index = self.proxy_model.mapToSource(self.currentIndex())
-        index = self.currentIndex()  # TODO Prikers
+        index = self.proxy_model.mapToSource(self.currentIndex())
+        #index = self.currentIndex()  # TODO Prikers
         if self.__prepare_plot():
             key = self.model.get_key(index)
             try:
@@ -1226,8 +1226,8 @@ class BaseTableView(QTableView):
     @Slot()
     def imshow_item(self):
         """Imshow item"""
-        #index = self.proxy_model.mapToSource(self.currentIndex())
-        index = self.currentIndex()  # TODO Prikers
+        index = self.proxy_model.mapToSource(self.currentIndex())
+        #index = self.currentIndex()  # TODO Prikers
         if self.__prepare_plot():
             key = self.model.get_key(index)
             try:
@@ -1448,7 +1448,8 @@ class CollectionsEditorTableView(BaseTableView):
     def refresh_menu(self):
         """Refresh context menu"""
         data = self.model.get_data()
-        index = self.currentIndex()
+        #index = self.currentIndex()
+        index = self.proxy_model.mapToSource(self.currentIndex())
         condition = (not isinstance(data, (tuple, set))) and index.isValid() \
                     and not self.readonly
         self.edit_action.setEnabled( condition )
