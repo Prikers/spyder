@@ -194,8 +194,8 @@ class NamespaceBrowser(QWidget):
                                            icon=ima.icon('filesaveas'),
                                            triggered=self.save_data)
         reset_namespace_button = create_toolbutton(
-                self, text=_("Reset the namespace"),
-                icon=ima.icon('editclear'), triggered=self.reset_namespace)
+                self, text=_("Remove all variables"),
+                icon=ima.icon('editdelete'), triggered=self.reset_namespace)
 
         self.search_button = create_toolbutton(
                 self, text=_("Search a variable"), icon=ima.icon('find'),
@@ -364,7 +364,8 @@ class NamespaceBrowser(QWidget):
     @Slot()
     def reset_namespace(self):
         warning = CONF.get('ipython_console', 'show_reset_namespace_warning')
-        self.shellwidget.reset_namespace(silent=True, warning=warning)
+        self.shellwidget.reset_namespace(warning=warning, silent=True,
+                                         message=True)
 
     @Slot()
     def save_data(self, filename=None):
