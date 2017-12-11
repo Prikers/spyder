@@ -244,6 +244,8 @@ class DirView(QTreeView):
     def get_selected_filenames(self):
         """Return selected filenames"""
         if self.selectionMode() == self.ExtendedSelection:
+            if self.selectionModel() is None:
+                return []
             return [self.get_filename(idx) for idx in 
                     self.selectionModel().selectedRows()]
         else:
@@ -586,7 +588,7 @@ class DirView(QTreeView):
     def delete_file(self, fname, multiple, yes_to_all):
         """Delete file"""
         if multiple:
-            buttons = QMessageBox.Yes|QMessageBox.YesAll| \
+            buttons = QMessageBox.Yes|QMessageBox.YesToAll| \
                       QMessageBox.No|QMessageBox.Cancel
         else:
             buttons = QMessageBox.Yes|QMessageBox.No
@@ -599,7 +601,7 @@ class DirView(QTreeView):
                 return yes_to_all
             elif answer == QMessageBox.Cancel:
                 return False
-            elif answer == QMessageBox.YesAll:
+            elif answer == QMessageBox.YesToAll:
                 yes_to_all = True
         try:
             if osp.isfile(fname):
@@ -1181,7 +1183,8 @@ class ExplorerWidget(QWidget):
     open_dir = Signal(str)
 
     def __init__(self, parent=None, name_filters=['*.py', '*.pyw'],
-                 show_all=False, show_cd_only=None, show_icontext=True):
+                 show_all=False, show_cd_only=None, show_icontext=True,
+                 options_button=None, menu=None):
         QWidget.__init__(self, parent)
 
         # Widgets
@@ -1189,8 +1192,11 @@ class ExplorerWidget(QWidget):
         button_previous = QToolButton(self)
         button_next = QToolButton(self)
         button_parent = QToolButton(self)
-        self.button_menu = QToolButton(self)
-        menu = QMenu(self)
+        self.button_menu = options_button or QToolButton(self)
+        if menu:
+            self.menu = menu
+        else:
+            self.menu = QMenu(self)
 
         self.action_widgets = [button_previous, button_next, button_parent,
                                self.button_menu]
@@ -1207,7 +1213,6 @@ class ExplorerWidget(QWidget):
         parent_action = create_action(self, text=_("Parent"),
                             icon=ima.icon('ArrowUp'),
                             triggered=self.treewidget.go_to_parent_directory)
-        options_action = create_action(self, text='', tip=_('Options'))
 
         # Setup widgets
         self.treewidget.setup(name_filters=name_filters, show_all=show_all)
@@ -1224,9 +1229,8 @@ class ExplorerWidget(QWidget):
 
         self.button_menu.setIcon(ima.icon('tooloptions'))
         self.button_menu.setPopupMode(QToolButton.InstantPopup)
-        self.button_menu.setMenu(menu)
-        add_actions(menu, self.treewidget.common_actions)
-        options_action.setMenu(menu)
+        self.button_menu.setMenu(self.menu)
+        add_actions(self.menu, self.treewidget.common_actions)
 
         self.toggle_icontext(show_icontext)
         icontext_action.setChecked(show_icontext)
