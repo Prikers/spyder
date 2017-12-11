@@ -21,20 +21,16 @@ from qtpy.QtWidgets import (QApplication, QHBoxLayout, QInputDialog, QMenu,
                             QMessageBox, QToolButton, QVBoxLayout, QWidget)
 
 # Third party imports (others)
-try:
-    import ipykernel.pickleutil
-    from ipykernel.serialize import serialize_object
-except ImportError:
-    serialize_object = None
+import cloudpickle
 
 # Local imports
 from spyder.config.base import _, get_supported_types
 from spyder.config.main import CONF
-from spyder.py3compat import is_text_string, getcwd, to_text_string
+from spyder.py3compat import is_text_string, to_text_string
 from spyder.utils import encoding
 from spyder.utils import icon_manager as ima
 from spyder.utils.iofuncs import iofunctions
-from spyder.utils.misc import fix_reference_name
+from spyder.utils.misc import fix_reference_name, getcwd_or_home
 from spyder.utils.programs import is_module_installed
 from spyder.utils.qthelpers import (add_actions, create_action,
                                     create_toolbutton, create_plugin_layout)
@@ -46,15 +42,8 @@ from spyder.widgets.variableexplorer.utils import REMOTE_SETTINGS
 
 SUPPORTED_TYPES = get_supported_types()
 
-# XXX --- Disable canning for Numpy arrays for now ---
-# This allows getting values between a Python 3 frontend
-# and a Python 2 kernel, and viceversa, for several types of
-# arrays.
-# See this link for interesting ideas on how to solve this
-# in the future:
-# http://stackoverflow.com/q/30698004/438386
-if serialize_object is not None:
-    ipykernel.pickleutil.can_map.pop('numpy.ndarray')
+# To be able to get and set variables between Python 2 and 3
+PICKLE_PROTOCOL = 2
 
 
 class NamespaceBrowser(QWidget):
@@ -201,8 +190,8 @@ class NamespaceBrowser(QWidget):
                                            icon=ima.icon('filesaveas'),
                                            triggered=self.save_data)
         reset_namespace_button = create_toolbutton(
-                self, text=_("Reset the namespace"),
-                icon=ima.icon('editclear'), triggered=self.reset_namespace)
+                self, text=_("Remove all variables"),
+                icon=ima.icon('editdelete'), triggered=self.reset_namespace)
 
         toolbar += [load_button, self.save_button, save_as_button,
                     reset_namespace_button]
@@ -301,8 +290,14 @@ class NamespaceBrowser(QWidget):
 
     def set_value(self, name, value):
         """Set value for a variable."""
-        value = serialize_object(value)
-        self.shellwidget.set_value(name, value)
+        try:
+            # We need to enclose values in a list to be able to send
+            # them to the kernel in Python 2
+            svalue = [cloudpickle.dumps(value, protocol=PICKLE_PROTOCOL)]
+            self.shellwidget.set_value(name, svalue)
+        except TypeError as e:
+            QMessageBox.critical(self, _("Error"),
+                                 "TypeError: %s" % to_text_string(e))
         self.refresh_table()
         
     def remove_values(self, names):
@@ -390,7 +385,7 @@ class NamespaceBrowser(QWidget):
         title = _("Import data")
         if filenames is None:
             if self.filename is None:
-                basedir = getcwd()
+                basedir = getcwd_or_home()
             else:
                 basedir = osp.dirname(self.filename)
             filenames, _selfilter = getopenfilenames(self, title, basedir,
@@ -457,7 +452,8 @@ class NamespaceBrowser(QWidget):
     @Slot()
     def reset_namespace(self):
         warning = CONF.get('ipython_console', 'show_reset_namespace_warning')
-        self.shellwidget.reset_namespace(silent=True, warning=warning)
+        self.shellwidget.reset_namespace(warning=warning, silent=True,
+                                         message=True)
 
     @Slot()
     def save_data(self, filename=None):
@@ -465,7 +461,7 @@ class NamespaceBrowser(QWidget):
         if filename is None:
             filename = self.filename
             if filename is None:
-                filename = getcwd()
+                filename = getcwd_or_home()
             filename, _selfilter = getsavefilename(self, _("Save data"),
                                                    filename,
                                                    iofunctions.save_filters)

@@ -29,14 +29,6 @@ from spyder.utils.qthelpers import create_toolbutton, get_icon
 from spyder.widgets.comboboxes import PatternComboBox
 
 
-CONTROL_CHARACTERS = {
-    '\\n': '\n',
-    '\\r': '\r',
-    '\\t': '\t',
-    '\\f': '\f'
-}
-
-
 def is_position_sup(pos1, pos2):
     """Return True is pos1 > pos2"""
     return pos1 > pos2
@@ -50,7 +42,14 @@ class FindReplace(QWidget):
     """Find widget"""
     STYLE = {False: "background-color:rgb(255, 175, 90);",
              True: "",
-             None: ""}
+             None: "",
+             'regexp_error': "background-color:rgb(255, 80, 80);",
+             }
+    TOOLTIP = {False: _("No matches"),
+               True: _("Search string"),
+               None: _("Search string"),
+               'regexp_error': _("Regular expression error")
+               }
     visibility_changed = Signal(bool)
     return_shift_pressed = Signal()
     return_pressed = Signal()
@@ -383,6 +382,16 @@ class FindReplace(QWidget):
         # When several lines are selected in the editor and replace box is activated, 
         # dynamic search is deactivated to prevent changing the selection. Otherwise
         # we show matching items.
+        def regexp_error_msg(pattern):
+            """Returns None if the pattern is a valid regular expression or
+            a string describing why the pattern is invalid.
+            """
+            try:
+                re.compile(pattern)
+            except re.error as e:
+                return str(e)
+            return None
+
         if multiline_replace_check and self.replace_widgets[0].isVisible() and \
            len(to_text_string(self.editor.get_selected_text()).splitlines())>1:
             return None
@@ -400,7 +409,17 @@ class FindReplace(QWidget):
             regexp = self.re_button.isChecked()
             found = self.editor.find_text(text, changed, forward, case=case,
                                           words=words, regexp=regexp)
-            self.search_text.lineEdit().setStyleSheet(self.STYLE[found])
+
+            stylesheet = self.STYLE[found]
+            tooltip = self.TOOLTIP[found]
+            if not found and regexp:
+                error_msg = regexp_error_msg(text)
+                if error_msg:  # special styling for regexp errors
+                    stylesheet = self.STYLE['regexp_error']
+                    tooltip = self.TOOLTIP['regexp_error'] + ': ' + error_msg
+            self.search_text.lineEdit().setStyleSheet(stylesheet)
+            self.search_text.setToolTip(tooltip)
+
             if self.is_code_editor and found:
                 if rehighlight or not self.editor.found_results:
                     self.highlight_timer.stop()
@@ -426,7 +445,12 @@ class FindReplace(QWidget):
         if (self.editor is not None):
             replace_text = to_text_string(self.replace_text.currentText())
             search_text = to_text_string(self.search_text.currentText())
-            pattern = search_text if self.re_button.isChecked() else None
+            re_pattern = None
+            if self.re_button.isChecked():
+                try:
+                    re_pattern = re.compile(search_text)
+                except re.error:
+                    return  # do nothing with an invalid regexp
             case = self.case_button.isChecked()
             first = True
             cursor = None
@@ -436,7 +460,7 @@ class FindReplace(QWidget):
                     seltxt = to_text_string(self.editor.get_selected_text())
                     cmptxt1 = search_text if case else search_text.lower()
                     cmptxt2 = seltxt if case else seltxt.lower()
-                    if not pattern:
+                    if re_pattern is None:
                         has_selected = self.editor.has_selected_text()
                         if has_selected and cmptxt1 == cmptxt2:
                             # Text was already found, do nothing
@@ -446,7 +470,7 @@ class FindReplace(QWidget):
                                              rehighlight=False):
                                 break
                     else:
-                        if len(re.findall(pattern, cmptxt2)) > 0:
+                        if len(re_pattern.findall(cmptxt2)) > 0:
                             pass
                         else:
                             if not self.find(changed=False, forward=True,
@@ -476,13 +500,13 @@ class FindReplace(QWidget):
                         # Avoid infinite loop: single found occurrence
                         break
                     position0 = position1
-                if pattern is None:
+                if re_pattern is None:
                     cursor.removeSelectedText()
                     cursor.insertText(replace_text)
                 else:
                     seltxt = to_text_string(cursor.selectedText())
                     cursor.removeSelectedText()
-                    cursor.insertText(re.sub(pattern, replace_text, seltxt))
+                    cursor.insertText(re_pattern.sub(replace_text, seltxt))
                 if self.find_next():
                     found_cursor = self.editor.textCursor()
                     cursor.setPosition(found_cursor.selectionStart(),
@@ -507,39 +531,36 @@ class FindReplace(QWidget):
     @Slot()
     def replace_find_selection(self, focus_replace_text=False):
         """Replace and find in the current selection"""
-        if (self.editor is not None):
+        if self.editor is not None:
             replace_text = to_text_string(self.replace_text.currentText())
             search_text = to_text_string(self.search_text.currentText())
-            pattern = search_text if self.re_button.isChecked() else None
             case = self.case_button.isChecked()
             words = self.words_button.isChecked()
             re_flags = re.MULTILINE if case else re.IGNORECASE|re.MULTILINE
 
-            cursor = self.editor.textCursor()
-            cursor.beginEditBlock()
-            seltxt = to_text_string(self.editor.get_selected_text())
-            if not pattern:
+            re_pattern = None
+            if self.re_button.isChecked():
+                pattern = search_text
+            else:
                 pattern = re.escape(search_text)
                 replace_text = re.escape(replace_text)
-            if words:
-                #If whole words is checked we need to check that each match
-                #is actually a whole word before replacing
-                try:
-                    re.compile(pattern)
-                except re.error:
-                    return #if the pattern won't compile cancel the find/replace
-                word_pattern = r'\b{pattern}\b'.format(pattern = pattern)
-                replacement = re.sub(word_pattern, replace_text, seltxt, flags=re_flags)
-            else:
-                replacement = re.sub(pattern, replace_text, seltxt, flags=re_flags)
-            if replacement != seltxt:
+            if words:  # match whole words only
+                pattern = r'\b{pattern}\b'.format(pattern=pattern)
+            try:
+                re_pattern = re.compile(pattern, flags=re_flags)
+            except re.error as e:
+                return  # do nothing with an invalid regexp
+
+            selected_text = to_text_string(self.editor.get_selected_text())
+            replacement = re_pattern.sub(replace_text, selected_text)
+            if replacement != selected_text:
+                cursor = self.editor.textCursor()
+                cursor.beginEditBlock()
                 cursor.removeSelectedText()
-                for plain_char in CONTROL_CHARACTERS:
-                    replacement = replacement.replace(
-                        plain_char, CONTROL_CHARACTERS[plain_char])
-                replacement = re.sub(r'\\(.)', r'\1', replacement)
+                if not self.re_button.isChecked():
+                    replacement = re.sub(r'\\(?![nrtf])(.)', r'\1', replacement)
                 cursor.insertText(replacement)
-            cursor.endEditBlock()
+                cursor.endEditBlock()
             if focus_replace_text:
                 self.replace_text.setFocus()
             else:

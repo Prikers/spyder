@@ -18,13 +18,13 @@ import os
 import os.path as osp
 from string import Template
 from threading import Thread
-import time
+from time import ctime, time, strftime, gmtime
 
 # Third party imports (qtpy)
-from qtpy.QtCore import QUrl, Signal, Slot
+from qtpy.QtCore import QUrl, QTimer, Signal, Slot
 from qtpy.QtGui import QKeySequence
-from qtpy.QtWidgets import (QHBoxLayout, QMenu, QMessageBox, QToolButton,
-                            QVBoxLayout, QWidget)
+from qtpy.QtWidgets import (QHBoxLayout, QLabel, QMenu, QMessageBox,
+                            QToolButton, QVBoxLayout, QWidget)
 
 # Local imports
 from spyder.config.base import _, get_image_path, get_module_source_path
@@ -84,7 +84,7 @@ class ClientWidget(QWidget, SaveHistoryMixin):
     to print different messages there.
     """
 
-    SEPARATOR = '{0}## ---({1})---'.format(os.linesep*2, time.ctime())
+    SEPARATOR = '{0}## ---({1})---'.format(os.linesep*2, ctime())
     INITHISTORY = ['# -*- coding: utf-8 -*-',
                    '# *** Spyder Python Console History Log ***',]
 
@@ -95,7 +95,9 @@ class ClientWidget(QWidget, SaveHistoryMixin):
                  additional_options, interpreter_versions,
                  connection_file=None, hostname=None,
                  menu_actions=None, slave=False,
-                 external_kernel=False, given_name=None):
+                 external_kernel=False, given_name=None,
+                 show_elapsed_time=False,
+                 reset_warning=True):
         super(ClientWidget, self).__init__(plugin)
         SaveHistoryMixin.__init__(self, history_filename)
 
@@ -105,11 +107,15 @@ class ClientWidget(QWidget, SaveHistoryMixin):
         self.hostname = hostname
         self.menu_actions = menu_actions
         self.slave = slave
+        self.external_kernel = external_kernel
         self.given_name = given_name
+        self.show_elapsed_time = show_elapsed_time
+        self.reset_warning = reset_warning
 
         # --- Other attrs
         self.options_button = None
         self.stop_button = None
+        self.reset_button = None
         self.stop_icon = ima.icon('stop')
         self.history = []
         self.allow_rename = True
@@ -127,12 +133,21 @@ class ClientWidget(QWidget, SaveHistoryMixin):
         self.loading_page = self._create_loading_page()
         self._show_loading_page()
 
+        # Elapsed time
+        self.time_label = None
+        self.t0 = None
+        self.timer = QTimer(self)
+
         # --- Layout
         vlayout = QVBoxLayout()
         toolbar_buttons = self.get_toolbar_buttons()
+
         hlayout = QHBoxLayout()
+        hlayout.addWidget(self.create_time_label())
+        hlayout.addStretch(0)
         for button in toolbar_buttons:
             hlayout.addWidget(button)
+
         vlayout.addLayout(hlayout)
         vlayout.setContentsMargins(0, 0, 0, 0)
         vlayout.addWidget(self.shellwidget)
@@ -142,14 +157,11 @@ class ClientWidget(QWidget, SaveHistoryMixin):
         # --- Exit function
         self.exit_callback = lambda: plugin.close_client(client=self)
 
-        # --- Signals
-        # As soon as some content is printed in the console, stop
-        # our loading animation
-        document = self.get_control().document()
-        document.contentsChange.connect(self._hide_loading_page)
-
         # --- Dialog manager
         self.dialog_manager = DialogManager()
+
+        # Show timer
+        self.update_time_label_visibility()
 
     #------ Public API --------------------------------------------------------
     @property
@@ -162,15 +174,19 @@ class ClientWidget(QWidget, SaveHistoryMixin):
     @property
     def stderr_file(self):
         """Filename to save kernel stderr output."""
+        stderr_file = None
         if self.connection_file is not None:
             stderr_file = self.kernel_id + '.stderr'
             if self.stderr_dir is not None:
                 stderr_file = osp.join(self.stderr_dir, stderr_file)
             else:
-                if not osp.isdir(TEMPDIR):
-                    os.makedirs(TEMPDIR)
-                stderr_file = osp.join(TEMPDIR, stderr_file)
-            return stderr_file
+                try:
+                    if not osp.isdir(TEMPDIR):
+                        os.makedirs(TEMPDIR)
+                    stderr_file = osp.join(TEMPDIR, stderr_file)
+                except (IOError, OSError):
+                    stderr_file = None
+        return stderr_file
 
     def configure_shellwidget(self, give_focus=True):
         """Configure shellwidget after kernel is started"""
@@ -215,10 +231,18 @@ class ClientWidget(QWidget, SaveHistoryMixin):
         # To sync with working directory toolbar
         self.shellwidget.executed.connect(self.shellwidget.get_cwd)
 
+        # To apply style
         if not create_qss_style(self.shellwidget.syntax_style)[1]:
             self.shellwidget.silent_execute("%colors linux")
         else:
             self.shellwidget.silent_execute("%colors lightbg")
+
+        # To hide the loading page
+        self.shellwidget.sig_prompt_ready.connect(self._hide_loading_page)
+
+        # Show possible errors when setting Matplotlib backend
+        self.shellwidget.sig_prompt_ready.connect(
+            self._show_mpl_backend_errors)
 
     def enable_stop_button(self):
         self.stop_button.setEnabled(True)
@@ -289,12 +313,20 @@ class ClientWidget(QWidget, SaveHistoryMixin):
 
     def get_options_menu(self):
         """Return options menu"""
+        reset_action = create_action(self, _("Remove all variables"),
+                                     icon=ima.icon('editdelete'),
+                                     triggered=self.reset_namespace)
+
+        self.show_time_action = create_action(self, _("Show elapsed time"),
+                                         toggled=self.set_elapsed_time_visible)
+
         env_action = create_action(
                         self,
                         _("Show environment variables"),
                         icon=ima.icon('environ'),
                         triggered=self.shellwidget.get_env
                      )
+
         syspath_action = create_action(
                             self,
                             _("Show sys.path contents"),
@@ -302,7 +334,12 @@ class ClientWidget(QWidget, SaveHistoryMixin):
                             triggered=self.shellwidget.get_syspath
                          )
 
-        additional_actions = [MENU_SEPARATOR, env_action, syspath_action]
+        self.show_time_action.setChecked(self.show_elapsed_time)
+        additional_actions = [reset_action,
+                              MENU_SEPARATOR,
+                              env_action,
+                              syspath_action,
+                              self.show_time_action]
 
         if self.menu_actions is not None:
             return self.menu_actions + additional_actions
@@ -312,6 +349,7 @@ class ClientWidget(QWidget, SaveHistoryMixin):
     def get_toolbar_buttons(self):
         """Return toolbar buttons list."""
         buttons = []
+
         # Code to add the stop button
         if self.stop_button is None:
             self.stop_button = create_toolbutton(
@@ -324,6 +362,17 @@ class ClientWidget(QWidget, SaveHistoryMixin):
             self.stop_button.clicked.connect(self.stop_button_click_handler)
         if self.stop_button is not None:
             buttons.append(self.stop_button)
+
+        # Reset namespace button
+        if self.reset_button is None:
+            self.reset_button = create_toolbutton(
+                                    self,
+                                    text=_("Remove"),
+                                    icon=ima.icon('editdelete'),
+                                    tip=_("Remove all variables"),
+                                    triggered=self.reset_namespace)
+        if self.reset_button is not None:
+            buttons.append(self.reset_button)
 
         if self.options_button is None:
             options = self.get_options_menu()
@@ -346,20 +395,28 @@ class ClientWidget(QWidget, SaveHistoryMixin):
                                                     'inspect current object')),
                                     icon=ima.icon('MessageBoxInformation'),
                                     triggered=self.inspect_object)
+
         clear_line_action = create_action(self, _("Clear line or block"),
-                                          QKeySequence("Shift+Escape"),
-                                          icon=ima.icon('editdelete'),
+                                          QKeySequence(get_shortcut(
+                                                  'console',
+                                                  'clear line')),
                                           triggered=self.clear_line)
-        reset_namespace_action = create_action(self, _("Reset namespace"),
-                                          QKeySequence("Ctrl+Alt+R"),
-                                          triggered=self.reset_namespace)
+
+        reset_namespace_action = create_action(self, _("Remove all variables"),
+                                               QKeySequence(get_shortcut(
+                                                       'ipython_console',
+                                                       'reset namespace')),
+                                               icon=ima.icon('editdelete'),
+                                               triggered=self.reset_namespace)
+
         clear_console_action = create_action(self, _("Clear console"),
                                              QKeySequence(get_shortcut('console',
                                                                'clear shell')),
-                                             icon=ima.icon('editclear'),
                                              triggered=self.clear_console)
+
         quit_action = create_action(self, _("&Quit"), icon=ima.icon('exit'),
                                     triggered=self.exit_callback)
+
         add_actions(menu, (None, inspect_action, clear_line_action,
                            clear_console_action, reset_namespace_action,
                            None, quit_action))
@@ -469,7 +526,8 @@ class ClientWidget(QWidget, SaveHistoryMixin):
     @Slot()
     def reset_namespace(self):
         """Resets the namespace by removing all names defined by the user"""
-        self.shellwidget.reset_namespace()
+        self.shellwidget.reset_namespace(warning=self.reset_warning,
+                                         message=True)
 
     def update_history(self):
         self.history = self.shellwidget._history
@@ -490,6 +548,39 @@ class ClientWidget(QWidget, SaveHistoryMixin):
         """Show environment variables."""
         self.dialog_manager.show(RemoteEnvDialog(env))
 
+    def create_time_label(self):
+        """Create elapsed time label widget (if necessary) and return it"""
+        if self.time_label is None:
+            self.time_label = QLabel()
+        return self.time_label
+
+    def show_time(self, end=False):
+        """Text to show in time_label."""
+        if self.time_label is None:
+            return
+        elapsed_time = time() - self.t0
+        if elapsed_time > 24 * 3600: # More than a day...!
+            fmt = "%d %H:%M:%S"
+        else:
+            fmt = "%H:%M:%S"
+        if end:
+            color = "#AAAAAA"
+        else:
+            color = "#AA6655"
+        text = "<span style=\'color: %s\'><b>%s" \
+               "</b></span>" % (color, strftime(fmt, gmtime(elapsed_time)))
+        self.time_label.setText(text)
+
+    def update_time_label_visibility(self):
+        """Update elapsed time visibility."""
+        self.time_label.setVisible(self.show_elapsed_time)
+
+    @Slot(bool)
+    def set_elapsed_time_visible(self, state):
+        """Slot to show/hide elapsed time label."""
+        self.show_elapsed_time = state
+        if self.time_label is not None:
+            self.time_label.setVisible(state)
 
     #------ Private API -------------------------------------------------------
     def _create_loading_page(self):
@@ -516,9 +607,7 @@ class ClientWidget(QWidget, SaveHistoryMixin):
         self.infowidget.hide()
         self.shellwidget.show()
         self.infowidget.setHtml(BLANK)
-
-        document = self.get_control().document()
-        document.contentsChange.disconnect(self._hide_loading_page)
+        self.shellwidget.sig_prompt_ready.disconnect(self._hide_loading_page)
 
     def _read_stderr(self):
         """Read the stderr file of the kernel."""
@@ -526,3 +615,13 @@ class ClientWidget(QWidget, SaveHistoryMixin):
         encoding = get_coding(stderr_text)
         stderr = to_text_string(stderr_text, encoding)
         return stderr
+
+    def _show_mpl_backend_errors(self):
+        """
+        Show possible errors when setting the selected Matplotlib backend.
+        """
+        if not self.external_kernel:
+            self.shellwidget.silent_execute(
+                    "get_ipython().kernel._show_mpl_backend_errors()")
+        self.shellwidget.sig_prompt_ready.disconnect(
+            self._show_mpl_backend_errors)
