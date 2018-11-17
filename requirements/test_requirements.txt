@@ -1,13 +1,12 @@
 mock
 pytest
-pytest-qt
 pytest-mock
 pytest-cov
-pytest-timeout
 pandas
 scipy
 sympy
 pillow
 matplotlib
 cython
+pytest-qt
 flaky

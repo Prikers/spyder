@@ -28,6 +28,8 @@ from spyder.config.user import NoDefault
 from spyder.py3compat import to_text_string
 from spyder.utils import syntaxhighlighters as sh
 
+# Third-party imports
+from qtconsole.styles import dark_color
 
 # To save metadata about widget shortcuts (needed to build our
 # preferences page)
@@ -126,10 +128,10 @@ def config_shortcut(action, context, name, parent):
 
 
 def iter_shortcuts():
-    """Iterate over keyboard shortcuts"""
-    for option in CONF.options('shortcuts'):
-        context, name = option.split("/", 1)
-        yield context, name, get_shortcut(context, name)
+    """Iterate over keyboard shortcuts."""
+    for context_name, keystr in CONF.items('shortcuts'):
+        context, name = context_name.split("/", 1)
+        yield context, name, keystr
 
 
 def reset_shortcuts():
@@ -162,6 +164,27 @@ def set_default_color_scheme(name, replace=True):
     """Reset color scheme to default values"""
     assert name in sh.COLOR_SCHEME_NAMES
     set_color_scheme(name, sh.get_color_scheme(name), replace=replace)
+
+
+def is_dark_font_color(color_scheme):
+    """Check if the font color used in the color scheme is dark."""
+    color_scheme = get_color_scheme(color_scheme)
+    font_color, fon_fw, fon_fs = color_scheme['normal']
+    return dark_color(font_color)
+
+
+def is_dark_interface():
+    ui_theme = CONF.get('color_schemes', 'ui_theme')
+    color_scheme = CONF.get('color_schemes', 'selected')
+    if ui_theme == 'dark':
+        return True
+    elif ui_theme == 'automatic':
+        if not is_dark_font_color(color_scheme):
+            return True
+        else:
+            return False
+    else:
+        return False
 
 
 for _name in sh.COLOR_SCHEME_NAMES:

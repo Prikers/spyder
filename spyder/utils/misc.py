@@ -7,13 +7,18 @@
 """Miscellaneous utilities"""
 
 import functools
+import logging
 import os
 import os.path as osp
+import re
 import sys
 import stat
 
 from spyder.py3compat import is_text_string, getcwd
-from spyder.config.base import get_home_dir, debug_print
+from spyder.config.base import get_home_dir
+
+
+logger = logging.getLogger(__name__)
 
 
 def __remove_pyc_pyo(fname):
@@ -123,26 +128,6 @@ def count_lines(path, extensions=None, excluded_dirnames=None):
         files += dfiles
         lines += dlines
     return files, lines
-
-
-def fix_reference_name(name, blacklist=None):
-    """Return a syntax-valid Python reference name from an arbitrary name"""
-    import re
-    name = "".join(re.split(r'[^0-9a-zA-Z_]', name))
-    while name and not re.match(r'([a-zA-Z]+[0-9a-zA-Z_]*)$', name):
-        if not re.match(r'[a-zA-Z]', name[0]):
-            name = name[1:]
-            continue
-    name = str(name)
-    if not name:
-        name = "data"
-    if blacklist is not None and name in blacklist:
-        get_new_name = lambda index: name+('%03d' % index)
-        index = 0
-        while get_new_name(index) in blacklist:
-            index += 1
-        name = get_new_name(index)
-    return name
 
 
 def remove_backslashes(path):
@@ -295,6 +280,18 @@ def getcwd_or_home():
     try:
         return getcwd()
     except OSError:
-        debug_print("WARNING: Current working directory was deleted, "
-                    "falling back to home dirertory")
+        logger.debug("WARNING: Current working directory was deleted, "
+                     "falling back to home dirertory")
         return get_home_dir()
+
+
+def regexp_error_msg(pattern):
+    """
+    Return None if the pattern is a valid regular expression or
+    a string describing why the pattern is invalid.
+    """
+    try:
+        re.compile(pattern)
+    except re.error as e:
+        return str(e)
+    return None

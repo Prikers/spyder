@@ -12,23 +12,23 @@ quickly load a user config file
 """
 
 import os
-import sys
 import os.path as osp
+import sys
 
 # Local import
 from spyder.config.base import (CHECK_ALL, EXCLUDED_NAMES, get_home_dir,
-                                SUBFOLDER, TEST)
+                                SUBFOLDER)
 from spyder.config.fonts import BIG, MEDIUM, MONOSPACE, SANS_SERIF
 from spyder.config.user import UserConfig
 from spyder.config.utils import IMPORT_EXT
 from spyder.utils import codeanalysis
 
 
-#==============================================================================
+# =============================================================================
 # Main constants
-#==============================================================================
+# =============================================================================
 # Find in files exclude patterns
-EXCLUDE_PATTERNS = [r'\.pyc$|\.pyo$|\.git']
+EXCLUDE_PATTERNS = ['*.csv, *.dat, *.log, *.tmp, *.bak, *.orig']
 
 # Extensions that should be visible in Spyder's file/project explorers
 SHOW_EXT = ['.py', '.ipynb', '.txt', '.dat', '.pdf', '.png', '.svg']
@@ -69,6 +69,7 @@ DEFAULTS = [
             ('main',
              {
               'icon_theme': 'spyder 3',
+              'opengl': 'software',
               'single_instance': True,
               'open_files_port': OPEN_FILES_PORT,
               'tear_off_menus': False,
@@ -94,7 +95,7 @@ DEFAULTS = [
               'use_custom_margin': True,
               'custom_margin': 0,
               'use_custom_cursor_blinking': False,
-              'show_internal_console_if_traceback': False,
+              'show_internal_errors': True,
               'check_updates_on_startup': True,
               'toolbars_visible': True,
               # Global Spyder fonts
@@ -108,6 +109,8 @@ DEFAULTS = [
               'rich_font/bold': False,
               'cursor/width': 2,
               'completion/size': (300, 180),
+              'report_error/remember_me': False,
+              'report_error/remember_token': False,
               }),
             ('quick_layouts',
              {
@@ -137,6 +140,8 @@ DEFAULTS = [
               'umr/enabled': True,
               'umr/verbose': True,
               'umr/namelist': [],
+              'custom_interpreters_list': [],
+              'custom_interpreter': '',
               }),
             ('ipython_console',
              {
@@ -154,15 +159,18 @@ DEFAULTS = [
               'pylab/inline/resolution': 72,
               'pylab/inline/width': 6,
               'pylab/inline/height': 4,
+              'pylab/inline/bbox_inches': True,
               'startup/run_lines': '',
               'startup/use_run_file': False,
               'startup/run_file': '',
               'greedy_completer': False,
+              'jedi_completer': False,
               'autocall': 0,
               'symbolic_math': False,
               'in_prompt': '',
               'out_prompt': '',
-              'show_elapsed_time': False
+              'show_elapsed_time': False,
+              'ask_before_restart': True
               }),
             ('variable_explorer',
              {
@@ -176,6 +184,11 @@ DEFAULTS = [
               'exclude_unsupported': True,
               'truncate': True,
               'minmax': False
+             }),
+            ('plots',
+             {
+              'mute_inline_plotting': False,
+              'show_plot_outline': False,
              }),
             ('editor',
              {
@@ -224,6 +237,7 @@ DEFAULTS = [
               'max_recent_files': 20,
               'save_all_before_run': True,
               'focus_to_editor': True,
+              'run_cell_copy': False,
               'onsave_analysis': False
               }),
             ('historylog',
@@ -255,13 +269,16 @@ DEFAULTS = [
               'enable': True,
               'show_fullpath': False,
               'show_all_files': False,
+              'group_cells': True,
+              'sort_files_alphabetically': False,
               'show_comments': True,
               }),
             ('project_explorer',
              {
               'name_filters': NAME_FILTERS,
               'show_all': True,
-              'show_hscrollbar': True
+              'show_hscrollbar': True,
+              'visible_if_project_open': True
               }),
             ('explorer',
              {
@@ -277,13 +294,24 @@ DEFAULTS = [
               'enable': True,
               'supported_encodings': ["utf-8", "iso-8859-1", "cp1252"],
               'exclude': EXCLUDE_PATTERNS,
-              'exclude_regexp': True,
-              'search_text_regexp': True,
+              'exclude_regexp': False,
+              'search_text_regexp': False,
               'search_text': [''],
               'search_text_samples': [codeanalysis.TASKS_PATTERN],
-              'in_python_path': False,
-              'more_options': False,
-              'case_sensitive': True
+              'more_options': True,
+              'case_sensitive': False
+              }),
+            ('breakpoints',
+             {
+              'enable': True,
+              }),
+            ('profiler',
+             {
+              'enable': True,
+              }),
+            ('pylint',
+             {
+              'enable': True,
               }),
             ('workingdir',
              {
@@ -329,7 +357,6 @@ DEFAULTS = [
               '_/switch to historylog': "Ctrl+Shift+L",
               '_/switch to onlinehelp': "Ctrl+Shift+D",
               '_/switch to project_explorer': "Ctrl+Shift+P",
-              '_/switch to console': "Ctrl+Shift+C",
               '_/switch to ipython_console': "Ctrl+Shift+I",
               '_/switch to variable_explorer': "Ctrl+Shift+V",
               '_/switch to find_in_files': "Ctrl+Shift+F",
@@ -354,6 +381,7 @@ DEFAULTS = [
               'editor/unindent': 'Ctrl+[',
               'editor/move line up': "Alt+Up",
               'editor/move line down': "Alt+Down",
+              'editor/go to new line': "Ctrl+Shift+Return",
               'editor/go to definition': "Ctrl+G",
               'editor/toggle comment': "Ctrl+1",
               'editor/blockcomment': "Ctrl+4",
@@ -364,8 +392,8 @@ DEFAULTS = [
               'editor/next line': "Meta+N",
               'editor/previous char': "Meta+B",
               'editor/next char': "Meta+F",
-              'editor/previous word': "Meta+Left",
-              'editor/next word': "Meta+Right",
+              'editor/previous word': "Ctrl+Left",
+              'editor/next word': "Ctrl+Right",
               'editor/kill to line end': "Meta+K",
               'editor/kill to line start': "Meta+U",
               'editor/yank': 'Meta+Y',
@@ -379,7 +407,7 @@ DEFAULTS = [
               'editor/cut': 'Ctrl+X',
               'editor/copy': 'Ctrl+C',
               'editor/paste': 'Ctrl+V',
-              'editor/delete': 'Delete',
+              'editor/delete': 'Del',
               'editor/select all': "Ctrl+A",
               # -- In widgets/editor.py
               'editor/inspect current object': 'Ctrl+I',
@@ -389,6 +417,8 @@ DEFAULTS = [
               'editor/go to line': 'Ctrl+L',
               'editor/go to previous file': 'Ctrl+Shift+Tab',
               'editor/go to next file': 'Ctrl+Tab',
+              'editor/cycle to previous file': 'Ctrl+PgUp',
+              'editor/cycle to next file': 'Ctrl+PgDown',
               'editor/new file': "Ctrl+N",
               'editor/open last closed':"Ctrl+Shift+T",
               'editor/open file': "Ctrl+O",
@@ -412,6 +442,9 @@ DEFAULTS = [
               'editor/go to next cell': 'Ctrl+Down',
               'editor/go to previous cell': 'Ctrl+Up',
               'editor/re-run last cell': RE_RUN_LAST_CELL_SHORTCUT,
+              'editor/split vertically': "Ctrl+{",
+              'editor/split horizontally': "Ctrl+_",
+              'editor/close split panel': "Alt+Shift+W",
               # -- In Breakpoints
               '_/switch to breakpoints': "Ctrl+Shift+B",
               # ---- Consoles (in widgets/shell) ----
@@ -434,6 +467,7 @@ DEFAULTS = [
               }),
             ('color_schemes',
              {
+              'ui_theme': 'automatic',
               'names': ['emacs', 'idle', 'monokai', 'pydev', 'scintilla',
                         'spyder', 'spyder/dark', 'zenburn', 'solarized/light',
                         'solarized/dark'],
@@ -628,13 +662,88 @@ DEFAULTS = [
               'solarized/dark/string':     ('#2aa198', False, False),
               'solarized/dark/number':     ('#cb4b16', False, False),
               'solarized/dark/instance':   ('#b58900', False, True)
-             })
+             }),
+            ('lsp-server', {
+                'python': {
+                    'index': 0,
+                    'cmd': 'pyls',
+                    'args': '--host %(host)s --port %(port)s --tcp',
+                    'host': '127.0.0.1',
+                    'port': 2087,
+                    'external': False,
+                    'configurations': {
+                        'pyls': {
+                            'configurationSources': [
+                                "pycodestyle", "pyflakes"],
+                            'plugins': {
+                                'pycodestyle': {
+                                    'enabled': True,
+                                    'exclude': [],
+                                    'filename': [],
+                                    'select': [],
+                                    'ignore': [],
+                                    'hangClosing': False,
+                                    'maxLineLength': 79
+                                },
+                                'pyflakes': {
+                                    'enabled': True
+                                },
+                                'yapf': {
+                                    'enabled': False
+                                },
+                                'pydocstyle': {
+                                    'enabled': False,
+                                    'convention': 'pep257',
+                                    'addIgnore': [],
+                                    'addSelect': [],
+                                    'ignore': [],
+                                    'select': [],
+                                    'match': "(?!test_).*\\.py",
+                                    'matchDir': '[^\\.].*',
+                                },
+                                'rope': {
+                                    'extensionModules': None,
+                                    'ropeFolder': []
+                                },
+                                'rope_completion': {
+                                    'enabled': False
+                                },
+                                'jedi_completion': {
+                                    'enabled': True
+                                },
+                                'jedi_hover': {
+                                    'enabled': True
+                                },
+                                'jedi_references': {
+                                    'enabled': True
+                                },
+                                'jedi_signature_help': {
+                                    'enabled': True
+                                },
+                                'jedi_symbols': {
+                                    'enabled': True,
+                                    'all_scopes': True
+                                },
+                                'mccabe': {
+                                    'enabled': False,
+                                    'threshold': 15
+                                },
+                                'preload': {
+                                    'enabled': True,
+                                    'modules': []
+                                }
+                            },
+
+                        }
+                    }
+                }
+            })
             ]
 
 
-#==============================================================================
+# =============================================================================
 # Config instance
-#==============================================================================
+# =============================================================================
 # IMPORTANT NOTES:
 # 1. If you want to *change* the default value of a current option, you need to
 #    do a MINOR update in config version, e.g. from 3.0.0 to 3.1.0
@@ -642,14 +751,14 @@ DEFAULTS = [
 #    or if you want to *rename* options, then you need to do a MAJOR update in
 #    version, e.g. from 3.0.0 to 4.0.0
 # 3. You don't need to touch this value if you're just adding a new option
-CONF_VERSION = '42.0.0'
+CONF_VERSION = '46.2.0'
 
 # Main configuration instance
 try:
-    CONF = UserConfig('spyder', defaults=DEFAULTS, load=(not TEST),
+    CONF = UserConfig('spyder', defaults=DEFAULTS, load=True,
                       version=CONF_VERSION, subfolder=SUBFOLDER, backup=True,
                       raw_mode=True)
-except:
+except Exception:
     CONF = UserConfig('spyder', defaults=DEFAULTS, load=False,
                       version=CONF_VERSION, subfolder=SUBFOLDER, backup=True,
                       raw_mode=True)

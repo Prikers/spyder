@@ -19,27 +19,6 @@ if PY2:
 # Order is important:
 EOL_CHARS = (("\r\n", 'nt'), ("\n", 'posix'), ("\r", 'mac'))
 
-ALL_LANGUAGES = {
-                 'Python': ('py', 'pyw', 'python', 'ipy'),
-                 'Cython': ('pyx', 'pxi', 'pxd'),
-                 'Enaml': ('enaml',),
-                 'Fortran77': ('f', 'for', 'f77'),
-                 'Fortran': ('f90', 'f95', 'f2k'),
-                 'Idl': ('pro',),
-                 'Diff': ('diff', 'patch', 'rej'),
-                 'GetText': ('po', 'pot'),
-                 'Nsis': ('nsi', 'nsh'),
-                 'Html': ('htm', 'html'),
-                 'Cpp': ('c', 'cc', 'cpp', 'cxx', 'h', 'hh', 'hpp', 'hxx'),
-                 'OpenCL': ('cl',),
-                 'Yaml':('yaml','yml'),
-                 "Markdown": ('md', 'mdw'),
-                 }
-
-PYTHON_LIKE_LANGUAGES = ('Python', 'Cython', 'Enaml')
-
-CELL_LANGUAGES = {'Python': ('#%%', '# %%', '# <codecell>', '# In[')}
-
 
 def get_eol_chars(text):
     """Get text EOL characters"""
@@ -71,9 +50,17 @@ def has_mixed_eol_chars(text):
     return repr(correct_text) != repr(text)
 
 
-def fix_indentation(text):
+def normalize_eols(text, eol='\n'):
+    """Use the same eol's in text"""
+    for eol_char, _ in EOL_CHARS:
+        if eol_char != eol:
+            text = text.replace(eol_char, eol)
+    return text
+
+
+def fix_indentation(text, indent_chars):
     """Replace tabs by spaces"""
-    return text.replace('\t', ' '*4)
+    return text.replace('\t', indent_chars)
 
     
 def is_builtin(text):
@@ -131,7 +118,7 @@ def path_components(path):
     Return the individual components of a given file path
     string (for the local operating system).
 
-    Taken from http://stackoverflow.com/q/21498939/438386
+    Taken from https://stackoverflow.com/q/21498939/438386
     """
     components = []
     # The loop guarantees that the returned components can be
@@ -151,7 +138,7 @@ def differentiate_prefix(path_components0, path_components1):
     """
     Return the differentiated prefix of the given two iterables. 
      
-    Taken from http://stackoverflow.com/q/21498939/438386
+    Taken from https://stackoverflow.com/q/21498939/438386
     """
     longest_prefix = []
     root_comparison = False

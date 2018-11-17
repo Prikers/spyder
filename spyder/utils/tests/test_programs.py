@@ -6,6 +6,7 @@
 """Tests for programs.py"""
 
 import os
+import sys
 
 from flaky import flaky
 import pytest
@@ -14,22 +15,34 @@ from spyder.utils.programs import (run_python_script_in_terminal,
                                    is_python_interpreter,
                                    is_python_interpreter_valid_name,
                                    find_program, shell_split, check_version,
-                                   is_module_installed)
+                                   is_module_installed, get_temp_dir,
+                                   is_stable_version)
 
 
 if os.name == 'nt':
     python_dir = os.environ['PYTHON'] if os.environ.get('CI', None) else ''
     VALID_INTERPRETER = os.path.join(python_dir, 'python.exe')
+    VALID_W_INTERPRETER = os.path.join(python_dir, 'pythonw.exe')
     INVALID_INTERPRETER = os.path.join(python_dir, 'Scripts', 'ipython.exe')
 else:
     home_dir = os.environ['HOME']
     VALID_INTERPRETER = os.path.join(home_dir, 'miniconda', 'bin', 'python')
+    VALID_W_INTERPRETER = os.path.join(home_dir, 'miniconda', 'bin', 'pythonw')
     INVALID_INTERPRETER = os.path.join(home_dir, 'miniconda', 'bin', 'ipython')
 
 
+@pytest.mark.skipif((sys.platform.startswith('linux') or
+                     os.environ.get('CI', None) is None),
+                    reason='It only runs in CI services and '
+                           'Linux does not have pythonw executables.')
+def test_is_valid_w_interpreter():
+    assert is_python_interpreter(VALID_W_INTERPRETER)
+
+
 @flaky(max_runs=3)
-@pytest.mark.skipif(os.name == 'nt' or os.environ.get('CI', None) is None,
-                    reason='gets stuck on Windows and fails sometimes locally') # FIXME
+@pytest.mark.skipif((os.name == 'nt' or os.environ.get('CI', None) is None or
+                     sys.platform == 'darwin'),
+                    reason='gets stuck on Windows and fails in macOS and sometimes locally') # FIXME
 def test_run_python_script_in_terminal(tmpdir, qtbot):
     scriptpath = tmpdir.join('write-done.py')
     outfilepath = tmpdir.join('out.txt')
@@ -44,8 +57,9 @@ def test_run_python_script_in_terminal(tmpdir, qtbot):
 
 
 @flaky(max_runs=3)
-@pytest.mark.skipif(os.name == 'nt' or os.environ.get('CI', None) is None,
-                    reason='gets stuck on Windows and fails sometimes locally') # FIXME
+@pytest.mark.skipif((os.name == 'nt' or os.environ.get('CI', None) is None or
+                     sys.platform == 'darwin'),
+                    reason='gets stuck on Windows and fails in macOS and sometimes locally') # FIXME
 def test_run_python_script_in_terminal_with_wdir_empty(tmpdir, qtbot):
     scriptpath = tmpdir.join('write-done.py')
     outfilepath = tmpdir.join('out.txt')
@@ -96,6 +110,35 @@ def test_is_module_installed():
     assert not is_module_installed('IPython', '>=1.0;<3.0')
     assert is_module_installed('jedi', '>=0.7.0')
 
+
+def test_is_module_installed_with_custom_interpreter():
+    """Test if a module with the proper version is installed"""
+    current = sys.executable
+    assert is_module_installed('qtconsole', '>=4.0', interpreter=current)
+    assert not is_module_installed('IPython', '>=1.0;<3.0', interpreter=current)
+    assert is_module_installed('jedi', '>=0.7.0', interpreter=current)
+
+
+def test_get_temp_dir_ensure_dir_exists():
+    """Test that the call to get_temp_dir creates the dir when it doesn't exists
+    """
+    temp_dir = get_temp_dir(suffix='test')
+    assert os.path.exists(temp_dir)
+
+    os.rmdir(temp_dir)
+
+    another_call = get_temp_dir(suffix='test')
+
+    assert os.path.exists(another_call)
+    assert another_call == temp_dir
+
+
+def test_is_stable_version():
+    """Test for is_stable_version."""
+    assert is_stable_version('3.3.0')
+    assert not is_stable_version('4.0.0b1')
+    assert not is_stable_version('3.3.2.dev0')
+
+
 if __name__ == '__main__':
     pytest.main()
-    

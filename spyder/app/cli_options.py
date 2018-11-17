@@ -41,8 +41,29 @@ def get_options(argv=None):
     parser.add_argument('--window-title', type=str, default=None,
                       help="String to show in the main window title")
     parser.add_argument('-p', '--project', default=None, type=str,
-                      dest="open_project",
+                      dest="project",
                       help="Path that contains an Spyder project")
+    parser.add_argument('--opengl', default=None,
+                      dest="opengl_implementation",
+                      choices=['software', 'desktop', 'gles'],
+                      help=("OpenGL implementation to pass to Qt")
+                      )
+    parser.add_argument('--debug-info', default=None,
+                        dest="debug_info",
+                        choices=['minimal', 'verbose'],
+                        help=("Level of internal debugging info to give. "
+                              "'minimal' only logs a small amount of "
+                              "confirmation messages and 'verbose' logs a "
+                              "lot of detailed information.")
+                       )
+    parser.add_argument('--debug-output', default='terminal',
+                        dest="debug_output",
+                        choices=['terminal', 'file'],
+                        help=("Print internal debugging info either to the "
+                              "terminal or to a file called spyder-debug.log "
+                              "in your current working directory. Default is "
+                              "'terminal'.")
+                       )
     parser.add_argument('files', nargs='*')
     options = parser.parse_args(argv)
     args = options.files
